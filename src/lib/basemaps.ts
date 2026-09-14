@@ -1,5 +1,6 @@
 import type { BaseMapPreset, MapPresetId } from '@/types'
 import { MAP_FOLDERS } from './constants'
+import { isDds, loadDdsImage } from './dds'
 import { ddsBufferToImage, isDds, loadDdsImage } from './dds'
 import { assembleImages } from './importer'
 
@@ -532,6 +533,8 @@ function loadManifest(): Promise<MapsManifest | null> {
   return manifestPromise
 }
 
+function probeImage(url: string): Promise<HTMLImageElement | null> {
+  if (isDds(url)) return loadDdsImage(url)
 /** Whether a build-time manifest was served (null until the first lookup settles). */
 export async function hasMapsManifest(): Promise<boolean> {
   return (await loadManifest()) !== null
@@ -592,6 +595,9 @@ async function probeFolder(preset: MapPresetId, errors: string[]): Promise<{ ite
   // Standard GTA V minimap grid: 3 columns × 4 rows.
   for (const prefix of ['minimap_sea_', 'minimap_', 'tile_']) {
     for (const ext of ['png', 'dds', 'jpg', 'webp']) {
+      const first = await probeImage(`${folder}/${prefix}0_0.${ext}`)
+      if (!first) continue
+      const tiles: { name: string; img: HTMLImageElement }[] = [{ name: `${prefix}0_0.${ext}`, img: first }]
       const firstPath = `${folder}/${prefix}0_0.${ext}`
       const first = await probeImage(mapsUrl(firstPath))
       if (!first.img) continue

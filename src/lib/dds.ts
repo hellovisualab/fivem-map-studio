@@ -266,6 +266,27 @@ export async function ddsToPngBlob(blob: Blob): Promise<Blob> {
   return new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('PNG encode failed'))), 'image/png'))
 }
 
+/** Fetches and decodes a DDS URL into an HTMLImageElement (object URL of the decoded PNG). */
+export async function loadDdsImage(url: string): Promise<HTMLImageElement | null> {
+  try {
+    const res = await fetch(url)
+    if (!res.ok) return null
+    const type = res.headers.get('content-type') ?? ''
+    if (type.includes('text/html')) return null
+    const buf = await res.arrayBuffer()
+    if (new DataView(buf).getUint32(0, true) !== DDS_MAGIC) return null
+    const { canvas } = ddsToCanvas(buf)
+    const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/png'))
+    if (!blob) return null
+    const objectUrl = URL.createObjectURL(blob)
+    return await new Promise<HTMLImageElement | null>((resolve) => {
+      const img = new Image()
+      img.onload = () => resolve(img)
+      img.onerror = () => resolve(null)
+      img.src = objectUrl
+    })
+  } catch {
+    return null
 export const isDdsBuffer = (buf: ArrayBuffer) => buf.byteLength >= 4 && new DataView(buf).getUint32(0, true) === DDS_MAGIC
 
 /** Decodes a DDS buffer into an HTMLImageElement backed by an object URL of the decoded PNG. */
