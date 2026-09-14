@@ -604,8 +604,9 @@ export function MapCanvas() {
               enabledAnchors={keepRatio ? ['top-left', 'top-right', 'bottom-left', 'bottom-right'] : undefined}
               anchorSize={9}
               anchorCornerRadius={3}
-              anchorStroke="#ec4899"
-              anchorFill="#0d0d11"
+              anchorStroke="#ffffff"
+              anchorFill="#ec4899"
+              anchorStrokeWidth={1.5}
               borderStroke="#ec4899"
               borderDash={[4, 3]}
               rotateAnchorOffset={24}
