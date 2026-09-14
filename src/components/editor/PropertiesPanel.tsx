@@ -407,7 +407,7 @@ function MapSettings() {
           ref={fileRef}
           type="file"
           multiple
-          accept=".png,.jpg,.jpeg,.webp,.zip"
+          accept=".png,.jpg,.jpeg,.webp,.dds,.zip"
           className="hidden"
           onChange={async (e) => {
             const files = e.target.files ? Array.from(e.target.files) : []

@@ -26,7 +26,7 @@ A visual minimap editor for FiveM (GTA V) servers. Design custom minimaps in the
   - Lines: width, dashed, arrow head
   - Markers: police, hospital, bank, shop, garage, custom icon → mapped to FiveM blip sprites
 - **Export FiveM Resource** – generates `fxmanifest.lua`, `client.lua`, `server.lua`, `config/` (Lua + JSON positions in world coordinates), `stream/` (full texture + 3×4 `minimap_sea_X_Y.png` tiles) and an optional `html/` NUI overlay, zipped for download
-- **Import** – PNG / JPG / WebP frames, split tiles (`*_X_Y.png` auto-stitched) and ZIP archives
+- **Import** – PNG / JPG / WebP / DDS (DXT1/3/5 decoded in-browser) frames, split tiles (`*_X_Y.*` auto-stitched) and ZIP archives
 - **Autosave** on every change (debounced), `Ctrl+S` manual save, `beforeunload` guard
 - **Plans** – Free (1 export / day) and Supporter (unlimited); limits enforced in the export dialog
 - **Responsive** – desktop side panels, tablet toggles, mobile horizontal toolbar with bottom sheets

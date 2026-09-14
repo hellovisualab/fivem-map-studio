@@ -2,8 +2,8 @@
 
 Drop the real minimap texture for the **Original Map** preset in this folder:
 
-- either **one image** (any file name, `.png` / `.jpg` / `.webp`),
-- or the **tile set** exported from the game, e.g. `minimap_sea_0_0.png` … `minimap_sea_2_3.png`
+- either **one image** (any file name, `.png` / `.jpg` / `.webp` / `.dds`),
+- or the **tile set** exported from the game, e.g. `minimap_sea_0_0.dds` … `minimap_sea_2_3.dds` (or `.png`)
   (any `name_X_Y.png` pattern works; the app stitches them in the browser).
 
 Do not rename this folder. After uploading, redeploy (Vercel rebuilds automatically on push).

@@ -18,10 +18,10 @@ landing page:
 
 Inside each folder put **either**:
 
-- a single composited image (any file name; `.png`, `.jpg` or `.webp`), **or**
+- a single composited image (any file name; `.png`, `.jpg`, `.webp` or `.dds`), **or**
 - the tile set exported from the game, e.g. `minimap_sea_0_0.png` … `minimap_sea_2_3.png`
   (3 columns × 4 rows). Any `name_X_Y.ext` pattern is accepted; tiles are stitched in the
-  browser. Keep PNG for tiles so the transparent sea is preserved.
+  browser. PNG and DDS (DXT1 / DXT3 / DXT5, the formats OpenIV exports) keep the transparent sea.
 
 Uploading through the GitHub web UI works: open the folder → **Add file → Upload files**.
 If you have a ZIP, extract it first and upload its images (GitHub does not unpack ZIPs).
