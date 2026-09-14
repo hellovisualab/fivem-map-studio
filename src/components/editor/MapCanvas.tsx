@@ -15,7 +15,9 @@ import { getData } from '@/lib/data'
 import { clamp, loadImage, readFileAsDataURL } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
 import type { BaseMap, MapElement } from '@/types'
+import { overlayFxOf } from '@/lib/overlayFx'
 import { ElementNode, type NodeHandlers } from './nodes'
+import { OverlayFxPreview } from './OverlayFxPreview'
 
 type Draft =
   | { kind: 'rect'; x0: number; y0: number; x1: number; y1: number }
@@ -512,6 +514,9 @@ export function MapCanvas() {
           scaleX={viewport.scale}
           scaleY={viewport.scale}
           draggable={panning}
+          onDragMove={(e) => {
+            if (e.target === stageRef.current) setViewport({ x: e.target.x(), y: e.target.y() })
+          }}
           onDragEnd={(e) => {
             if (e.target === stageRef.current) setViewport({ x: e.target.x(), y: e.target.y() })
           }}
@@ -654,6 +659,16 @@ export function MapCanvas() {
             )}
           </Layer>
         </Stage>
+      )}
+      {size.w > 0 && (
+        <OverlayFxPreview
+          fx={overlayFxOf(doc)}
+          x={viewport.x}
+          y={viewport.y}
+          width={mapW * viewport.scale}
+          height={mapH * viewport.scale}
+          map={styled?.island}
+        />
       )}
 
       {editingText && (

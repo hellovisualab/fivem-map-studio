@@ -15,6 +15,7 @@ import { toast } from '@/components/ui/Toast'
 import { Button } from '@/components/ui/Button'
 import type { BaseMapStyle, BlendMode, ElementEffects, MapElement, MarkerIcon, TextElement, ZoneType } from '@/types'
 import { MarkerGlyph } from './Toolbar'
+import { OverlayFxSection } from './OverlayFxSection'
 
 function Field({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
   return (
@@ -426,6 +427,7 @@ function MapSettings() {
         />
       </Section>
       <MapStyleSections />
+      <OverlayFxSection />
       <Section title="Grid">
         <div className="flex items-center justify-between">
           <span className="flex items-center gap-2 text-xs text-ink-300">

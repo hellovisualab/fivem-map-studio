@@ -2,6 +2,8 @@ import JSZip from 'jszip'
 import type { MapDocument, MapElement, Project } from '@/types'
 import { absolutePoints, canvasToWorld } from './geometry'
 import { canvasToBlob, renderDocument } from './render'
+import { overlayFxOf, overlayIndexHtml, overlayFxDriverJs } from './overlayFx'
+import overlayFxCss from './overlayFx.css?raw'
 import { hexToRgb, round, slugify } from './utils'
 
 export interface ExportOptions {
@@ -357,7 +359,7 @@ end)
 ${
   opts.includeHtml
     ? `
--- /minimapoverlay toggles the HTML overlay that mirrors your studio design.
+-- /minimapoverlay toggles the HTML overlay (studio design + CSS effects).
 local overlayVisible = false
 RegisterCommand("minimapoverlay", function()
     overlayVisible = not overlayVisible
@@ -388,24 +390,9 @@ RegisterNetEvent("fms:requestZones", function()
 end)
 `
 
-const htmlIndex = `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <link rel="stylesheet" href="style.css" />
-  </head>
-  <body>
-    <div id="overlay" class="hidden">
-      <img id="overlay-img" src="overlay.png" alt="minimap overlay" />
-    </div>
-    <script src="script.js"></script>
-  </body>
-</html>
-`
-
-const htmlCss = `html, body { margin: 0; background: transparent; overflow: hidden; }
+const htmlCssBase = `html, body { margin: 0; background: transparent; overflow: hidden; }
 #overlay { position: fixed; left: 1.2vw; bottom: 2.4vh; width: 15vw; pointer-events: none; opacity: 0.9;
-  transition: opacity .2s ease; }
+  transition: opacity .2s ease; border-radius: 6px; }
 #overlay.hidden { opacity: 0; }
 #overlay img { width: 100%; height: auto; display: block; border-radius: 6px; }
 `
@@ -453,7 +440,7 @@ Generated with **LABSEVE7 Map Studio** from project "${project.name}".
 - \`config/*.json\` – the same data as JSON for other tools
 - \`config/project.json\` – full studio project (re-import it in LABSEVE7 Map Studio)
 - \`stream/\` – minimap textures
-- \`html/\` – optional NUI overlay (toggle with /minimapoverlay)
+- \`html/\` – optional NUI overlay with CSS effects (toggle with /minimapoverlay)
 `
 
 export async function exportFiveMResource(project: Project, opts: ExportOptions): Promise<Blob> {
@@ -530,10 +517,11 @@ export async function exportFiveMResource(project: Project, opts: ExportOptions)
   if (opts.includeHtml) {
     progress(75, 'Rendering NUI overlay')
     const overlay = await renderDocument(doc, { overlayOnly: true, maxWidth: 1024 })
+    const fx = overlayFxOf(doc)
     const html = root.folder('html')!
-    html.file('index.html', htmlIndex)
-    html.file('style.css', htmlCss)
-    html.file('script.js', htmlJs)
+    html.file('index.html', overlayIndexHtml(fx))
+    html.file('style.css', `${htmlCssBase}\n${overlayFxCss}`)
+    html.file('script.js', `${htmlJs}\n${overlayFxDriverJs}`)
     html.file('overlay.png', await canvasToBlob(overlay, 'image/png'))
   }
 

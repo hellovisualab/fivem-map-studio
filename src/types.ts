@@ -197,6 +197,31 @@ export interface WorldBounds {
   maxY: number
 }
 
+/** CSS animations applied to the exported NUI overlay (not the native radar). */
+export type OverlayFxId =
+  | 'pulse'
+  | 'glow'
+  | 'breathe'
+  | 'scanlines'
+  | 'radar'
+  | 'flicker'
+  | 'heartbeat'
+  | 'shimmer'
+  | 'ripple'
+  | 'hue'
+  | 'glitch'
+  | 'vignette'
+
+export interface OverlayFx {
+  ids: OverlayFxId[]
+  /** 0–1 strength of the selected effects. */
+  intensity: number
+  /** 0.25–3 playback rate. 1 = default tempo. */
+  speed: number
+  /** Accent used by glow, radar, shimmer and ripple. */
+  color: string
+}
+
 export interface MapDocument {
   version: 1
   baseMap: BaseMap
@@ -208,6 +233,8 @@ export interface MapDocument {
   }
   /** Sea / canvas color, or the literal 'transparent' for alpha exports. */
   background: string
+  /** Animated NUI overlay effects. Omitted on older projects. */
+  overlayFx?: OverlayFx
 }
 
 export type PlanId = 'free' | 'supporter'

@@ -8,6 +8,7 @@ import { toast } from '@/components/ui/Toast'
 import { useEditor } from '@/store/useEditor'
 import { useAuth } from '@/store/useAuth'
 import { exportFiveMResource, buildPositions } from '@/lib/exporter'
+import { overlayFxOf, OVERLAY_FX_BY_ID } from '@/lib/overlayFx'
 import { getData } from '@/lib/data'
 import { downloadBlob, slugify, uid } from '@/lib/utils'
 import type { HistoryEntry } from '@/types'
@@ -31,8 +32,14 @@ export function ExportDialog({ open, onClose }: { open: boolean; onClose: () => 
     if (project) setResourceName(slugify(`${project.name}_minimap`))
   }, [project])
 
+  useEffect(() => {
+    if (open && doc && overlayFxOf(doc).ids.length) setIncludeHtml(true)
+  }, [open, doc])
+
   if (!project || !doc) return null
   const stats = buildPositions(doc)
+  const overlayFx = overlayFxOf(doc)
+  const fxSummary = overlayFx.ids.map((id) => OVERLAY_FX_BY_ID[id].label).join(', ')
   const locked = remaining !== null && remaining <= 0
 
   const run = async () => {
@@ -119,7 +126,7 @@ export function ExportDialog({ open, onClose }: { open: boolean; onClose: () => 
             {[
               { k: 'textures', label: 'Minimap textures (stream/)', desc: 'Full PNG render of your map', v: includeTextures, set: setIncludeTextures },
               { k: 'tiles', label: 'Split into 2×3 tiles', desc: 'minimap_sea_R_C.png (vanilla layout), ready for minimap.ytd', v: splitTiles && includeTextures, set: setSplitTiles, disabled: !includeTextures },
-              { k: 'html', label: 'NUI overlay (html/)', desc: 'Toggle with /minimapoverlay in-game', v: includeHtml, set: setIncludeHtml },
+              { k: 'html', label: 'NUI overlay (html/)', desc: overlayFx.ids.length ? `Animates ${fxSummary} · /minimapoverlay` : 'Toggle with /minimapoverlay in-game', v: includeHtml, set: setIncludeHtml },
             ].map((o) => (
               <label key={o.k} className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition ${o.v ? 'border-brand-500/40 bg-brand-500/5' : 'border-ink-700 hover:border-ink-500'} ${o.disabled ? 'opacity-50' : ''}`}>
                 <input type="checkbox" className="mt-0.5 accent-brand-500" checked={o.v} disabled={o.disabled} onChange={(e) => o.set(e.target.checked)} />
@@ -129,6 +136,9 @@ export function ExportDialog({ open, onClose }: { open: boolean; onClose: () => 
                 </span>
               </label>
             ))}
+            {overlayFx.ids.length > 0 && !includeHtml && (
+              <p className="text-[11px] text-amber-300">Overlay effects only run in the NUI overlay. Leave this enabled to export them.</p>
+            )}
           </div>
 
           <div className="rounded-xl border border-ink-700 bg-ink-900/60 p-3 text-xs text-ink-400">
@@ -139,7 +149,7 @@ export function ExportDialog({ open, onClose }: { open: boolean; onClose: () => 
               {`├─ fxmanifest.lua
 ├─ client.lua · server.lua
 ├─ config/ config.lua · zones.json · markers.json · labels.json · positions.json
-${includeTextures ? `├─ stream/ minimap_full.png${splitTiles ? ' · minimap_sea_0_0…2_3.png' : ''}\n` : ''}${includeHtml ? '└─ html/ index.html · overlay.png' : '└─ README.md'}`}
+${includeTextures ? `├─ stream/ minimap_full.png${splitTiles ? ' · minimap_sea_0_0…2_3.png' : ''}\n` : ''}${includeHtml ? '└─ html/ index.html · style.css · overlay.png' : '└─ README.md'}`}
             </pre>
           </div>
         </div>
@@ -164,6 +174,7 @@ ${includeTextures ? `├─ stream/ minimap_full.png${splitTiles ? ' · minimap_
               <li>Zones &amp; blips in GTA coordinates</li>
               <li>JSON positions for other tools</li>
               <li>PNG textures ready for minimap.ytd</li>
+              {overlayFx.ids.length > 0 && <li>NUI overlay effects ({overlayFx.ids.length})</li>}
             </ul>
           </div>
         </aside>
