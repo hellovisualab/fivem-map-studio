@@ -8,7 +8,12 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      three: fileURLToPath(new URL('./node_modules/three', import.meta.url)),
     },
+    dedupe: ['three'],
+  },
+  optimizeDeps: {
+    include: ['three', '@react-three/fiber', '@react-three/drei'],
   },
   server: {
     host: true,
