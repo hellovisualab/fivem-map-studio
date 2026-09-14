@@ -20,19 +20,27 @@ Inside each folder put **one of**:
 
 - a single composited image (any file name; `.png`, `.jpg`, `.webp` or `.dds`),
 - a **ZIP** containing the image or the tiles (unpacked in the browser), or
-- the tile set exported from the game, e.g. `minimap_sea_0_0.png` … `minimap_sea_2_3.png`
-  (3 columns × 4 rows). Any `name_X_Y.ext` pattern is accepted; tiles are stitched in the
-  browser. PNG and DDS (DXT1 / DXT3 / DXT5, the formats OpenIV exports) keep the transparent sea.
+- the tile set exported from the game, e.g. `minimap_sea_0_0.dds` … `minimap_sea_2_1.dds`
+  (six 4096² tiles laid out as 2 columns × 3 rows). Any `name_A_B.ext` pattern is accepted;
+  whether `A` is the row or the column is detected automatically by matching the tile seams.
+  PNG and DDS (DXT1 / DXT3 / DXT5, the formats OpenIV exports) keep the transparent sea.
 
 Uploading through the GitHub web UI works: open the folder → **Add file → Upload files**.
 If you have a ZIP, extract it first and upload its images (GitHub does not unpack ZIPs).
 
 ## How it is wired
 
-`npm run build` (and `npm run dev`) first runs `scripts/maps-manifest.mjs`, which indexes
-the images here into `public/maps/manifest.json`. The app reads that manifest, so no
-directory listing is required on static hosts. Without a manifest the app falls back to
-probing `full.*` / `minimap.*` / `minimap_sea_X_Y.*` inside each folder.
+`npm run build` (and `npm run dev`) first runs `scripts/build-maps.mjs`. Raw game exports
+are far too heavy for the browser (six DXT5 tiles ≈ 100 MB per map), so the script decodes
+the DDS/PNG tiles in Node, detects the grid layout, stitches and downsamples them to a
+4096 px editor texture plus a 1024 px preview, and writes them as WebP into
+`public/maps/_generated/` (PNG when `sharp` is unavailable). `public/maps/manifest.json`
+points the app at those files, so the browser downloads one ~2 MB image per preset
+instead of the raw tiles. Both outputs are git-ignored and regenerated on every deploy.
+
+Without a manifest (e.g. a static copy of `dist/` built without the script) the app falls
+back to probing `full.*` / `minimap.*` / `minimap_sea_X_Y.*` inside each folder and
+stitching in the browser.
 
 The legacy single-file convention `public/maps/<preset>.jpg` (`color.jpg`, `original.jpg`,
 `satellite.jpg`, `realmap.jpg`, `realmapdown.jpg`) still works.
@@ -41,7 +49,7 @@ The legacy single-file convention `public/maps/<preset>.jpg` (`color.jpg`, `orig
 
 1. Open `x64a.rpf` (or the update RPFs) in **OpenIV** and locate `minimap.ytd` /
    `minimap_sea_*.ytd`.
-2. Export the tiles as PNG and copy them into the matching folder above.
+2. Export the tiles as DDS or PNG and copy them into the matching folder above.
 3. Push / redeploy. The preset card shows the real texture with its size and tile count.
 
 Community-made variants (satellite, colored, "down" versions, etc.) work the same way as

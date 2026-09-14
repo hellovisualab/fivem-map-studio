@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "predev": "node scripts/maps-manifest.mjs",
+    "predev": "node scripts/build-maps.mjs",
     "build": "tsc -b && vite build",
-    "prebuild": "node scripts/maps-manifest.mjs",
-    "maps": "node scripts/maps-manifest.mjs",
+    "prebuild": "node scripts/build-maps.mjs",
+    "postbuild": "node scripts/prune-maps.mjs",
+    "maps": "node scripts/build-maps.mjs",
     "lint": "oxlint",
     "preview": "vite preview"
   },
@@ -38,5 +39,8 @@
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.2",
     "vite": "^8.3.0"
+  },
+  "optionalDependencies": {
+    "sharp": "^0.33.5"
   }
 }

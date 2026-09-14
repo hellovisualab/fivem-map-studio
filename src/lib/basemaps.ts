@@ -1,7 +1,8 @@
+import JSZip from 'jszip'
 import type { BaseMapPreset, MapPresetId } from '@/types'
 import { MAP_FOLDERS } from './constants'
-import { ddsBufferToImage, isDds, loadDdsImage } from './dds'
-import { assembleImages } from './importer'
+import { isDds, isDdsBuffer } from './dds'
+import { assembleImages, ddsBlobToFrame, type Frame } from './importer'
 
 export const PRESET_SIZE = { width: 1536, height: 2048 }
 
@@ -499,19 +500,46 @@ export interface PresetSource {
 
 interface LoadedItem {
   name: string
-  img: HTMLImageElement
+  img: Frame
 }
 
 const REAL_MAP_EXTENSIONS = ['jpg', 'png', 'webp', 'jpeg', 'dds']
 const sourceCache = new Map<string, Promise<PresetSource>>()
 const resolved = new Map<string, PresetSource>()
 
-/** Manifest written by `scripts/maps-manifest.mjs` at build time: preset id → file paths under /maps/. */
-type MapsManifest = Record<string, string[]>
+/**
+ * Manifest written by `scripts/build-maps.mjs` at build time. Version 2
+ * entries point at a pre-stitched, downsampled image (plus a preview) so the
+ * browser never has to decode the raw DDS tiles. Entries without `full` list
+ * the raw files (and the reason the build step could not use them) and are
+ * loaded/stitched in the browser as a fallback.
+ */
+interface ManifestEntry {
+  files: string[]
+  errors?: string[]
+  full?: string
+  preview?: string
+  width?: number
+  height?: number
+  tiles?: number
+}
+type MapsManifest = Record<string, ManifestEntry>
 let manifestPromise: Promise<MapsManifest | null> | null = null
 
 const baseUrl = () => import.meta.env.BASE_URL.replace(/\/$/, '')
 const mapsUrl = (path: string) => `${baseUrl()}/maps/${path.split('/').map(encodeURIComponent).join('/')}`
+
+function normalizeManifest(json: unknown): MapsManifest | null {
+  if (!json || typeof json !== 'object') return null
+  const obj = json as Record<string, unknown>
+  if (obj.version === 2 && obj.presets && typeof obj.presets === 'object') {
+    return obj.presets as MapsManifest
+  }
+  // Legacy v1: preset id → string[] of file paths.
+  const out: MapsManifest = {}
+  for (const [k, v] of Object.entries(obj)) if (Array.isArray(v)) out[k] = { files: v as string[] }
+  return out
+}
 
 function loadManifest(): Promise<MapsManifest | null> {
   if (!manifestPromise) {
@@ -521,8 +549,7 @@ function loadManifest(): Promise<MapsManifest | null> {
         // SPA hosts rewrite unknown paths to index.html; guard against HTML.
         const text = await r.text()
         try {
-          const json = JSON.parse(text) as MapsManifest
-          return json && typeof json === 'object' ? json : null
+          return normalizeManifest(JSON.parse(text))
         } catch {
           return null
         }
@@ -554,7 +581,6 @@ async function loadZip(url: string, errors: string[]): Promise<LoadedItem[]> {
     errors.push(`${url}: HTTP ${res.status}`)
     return []
   }
-  const { default: JSZip } = await import('jszip')
   const zip = await JSZip.loadAsync(await res.arrayBuffer())
   const items: LoadedItem[] = []
   for (const entry of Object.values(zip.files)) {
@@ -562,7 +588,7 @@ async function loadZip(url: string, errors: string[]): Promise<LoadedItem[]> {
     const name = entry.name.split('/').pop() ?? entry.name
     try {
       if (isDds(name)) {
-        items.push({ name, img: await ddsBufferToImage(await entry.async('arraybuffer')) })
+        items.push({ name, img: await ddsBlobToFrame(await entry.async('blob')) })
       } else if (/\.(png|jpe?g|webp)$/i.test(name)) {
         const blob = await entry.async('blob')
         const { img, error } = await loadPlainImage(URL.createObjectURL(blob))
@@ -576,8 +602,22 @@ async function loadZip(url: string, errors: string[]): Promise<LoadedItem[]> {
   return items
 }
 
-function probeImage(url: string): Promise<{ img: HTMLImageElement | null; error?: string }> {
-  if (isDds(url)) return loadDdsImage(url)
+/** Fetches and decodes a DDS URL into a downscaled canvas. Returns the failure reason instead of throwing. */
+async function loadDdsFrame(url: string): Promise<{ img: Frame | null; error?: string }> {
+  try {
+    const res = await fetch(url)
+    if (!res.ok) return { img: null, error: `HTTP ${res.status}` }
+    if ((res.headers.get('content-type') ?? '').includes('text/html')) return { img: null, error: 'file not found (server returned the app page)' }
+    const blob = await res.blob()
+    if (!isDdsBuffer(await blob.slice(0, 4).arrayBuffer())) return { img: null, error: 'not a DDS file (missing "DDS " magic)' }
+    return { img: await ddsBlobToFrame(blob) }
+  } catch (e) {
+    return { img: null, error: (e as Error).message }
+  }
+}
+
+function probeImage(url: string): Promise<{ img: Frame | null; error?: string }> {
+  if (isDds(url)) return loadDdsFrame(url)
   return loadPlainImage(url)
 }
 
@@ -618,7 +658,9 @@ async function probeFolder(preset: MapPresetId, errors: string[]): Promise<{ ite
 }
 
 async function loadFromManifest(preset: MapPresetId, manifest: MapsManifest, errors: string[]): Promise<{ items: LoadedItem[]; files: string[] }> {
-  const files = manifest[preset] ?? manifest[MAP_FOLDERS[preset]] ?? []
+  const entry = manifest[preset] ?? manifest[MAP_FOLDERS[preset]]
+  const files = entry?.files ?? []
+  errors.push(...(entry?.errors ?? []))
   const items: LoadedItem[] = []
   await Promise.all(
     files.map(async (f) => {
@@ -647,12 +689,29 @@ export function resolvePresetSource(preset: MapPresetId): Promise<PresetSource> 
     p = (async () => {
       const errors: string[] = []
       const manifest = await loadManifest()
-      const { items, files } = manifest ? await loadFromManifest(preset, manifest, errors) : await probeFolder(preset, errors)
+      const built = manifest?.[preset] ?? manifest?.[MAP_FOLDERS[preset]]
       let source: PresetSource
-      if (items.length === 1) {
+      if (built?.full && built.width && built.height) {
+        // Pre-stitched at build time: nothing to decode here.
+        const src = mapsUrl(built.full)
+        source = {
+          src,
+          width: built.width,
+          height: built.height,
+          real: true,
+          preview: built.preview ? mapsUrl(built.preview) : src,
+          tiles: built.tiles ?? 1,
+          files: built.files ?? [],
+          errors: built.errors ?? [],
+        }
+        resolved.set(preset, source)
+        return source
+      }
+      const { items, files } = manifest ? await loadFromManifest(preset, manifest, errors) : await probeFolder(preset, errors)
+      if (items.length === 1 && items[0].img instanceof HTMLImageElement) {
         const { img } = items[0]
         source = { src: img.src, width: img.naturalWidth, height: img.naturalHeight, real: true, preview: img.src, tiles: 1, files, errors }
-      } else if (items.length > 1) {
+      } else if (items.length >= 1) {
         const map = assembleImages(items)
         const blob = await new Promise<Blob | null>((res) => map.canvas.toBlob(res, 'image/png'))
         const url = blob ? URL.createObjectURL(blob) : map.canvas.toDataURL('image/png')

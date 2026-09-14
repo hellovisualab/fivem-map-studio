@@ -425,11 +425,11 @@ FiveM streams minimap textures from a .ytd texture dictionary. Browsers cannot
 write .ytd files, so this folder contains ready-to-pack PNGs:
 
   minimap_full.png             full composited minimap (reference / NUI use)
-  minimap_sea_X_Y.png          ${cols}x${rows} tiles (X = column, Y = row) matching the vanilla layout
+  minimap_sea_R_C.png          ${cols} columns x ${rows} rows (R = row, C = column), same naming as the vanilla textures
 
 Steps:
   1. Open OpenIV (or CodeWalker) and create a new texture dictionary named minimap.ytd
-  2. Import every minimap_sea_X_Y.png, keeping the file names as texture names
+  2. Import every minimap_sea_R_C.png, keeping the file names as texture names
   3. Save minimap.ytd inside this stream/ folder and delete the PNGs
   4. Restart the resource: ensure ${'<resource>'} in server.cfg
 
@@ -518,7 +518,8 @@ export async function exportFiveMResource(project: Project, opts: ExportOptions)
           t.width = tw
           t.height = th
           t.getContext('2d')!.drawImage(full, c * tw, r * th, tw, th, 0, 0, tw, th)
-          stream.file(`minimap_sea_${c}_${r}.png`, await canvasToBlob(t, 'image/png'))
+          // Vanilla naming is minimap_sea_<row>_<col> (2 columns × 3 rows in the base game).
+          stream.file(`minimap_sea_${r}_${c}.png`, await canvasToBlob(t, 'image/png'))
           i++
           progress(20 + Math.round((i / (cols * rows)) * 50), `Slicing tile ${i}/${cols * rows}`)
         }

@@ -25,7 +25,7 @@ A visual minimap editor for FiveM (GTA V) servers. Design custom minimaps in the
   - Images: PNG / JPG / WebP with scale, rotate, move
   - Lines: width, dashed, arrow head
   - Markers: police, hospital, bank, shop, garage, custom icon → mapped to FiveM blip sprites
-- **Export FiveM Resource** – generates `fxmanifest.lua`, `client.lua`, `server.lua`, `config/` (Lua + JSON positions in world coordinates), `stream/` (full texture + 3×4 `minimap_sea_X_Y.png` tiles) and an optional `html/` NUI overlay, zipped for download
+- **Export FiveM Resource** – generates `fxmanifest.lua`, `client.lua`, `server.lua`, `config/` (Lua + JSON positions in world coordinates), `stream/` (full texture + 2×3 `minimap_sea_R_C.png` tiles named like the vanilla textures) and an optional `html/` NUI overlay, zipped for download
 - **Import** – PNG / JPG / WebP / DDS (DXT1/3/5 decoded in-browser) frames, split tiles (`*_X_Y.*` auto-stitched) and ZIP archives
 - **Autosave** on every change (debounced), `Ctrl+S` manual save, `beforeunload` guard
 - **Plans** – Free (1 export / day) and Supporter (unlimited); limits enforced in the export dialog
@@ -112,7 +112,7 @@ src/
 │  └─ project.json       re-importable studio project
 ├─ stream/
 │  ├─ minimap_full.png
-│  ├─ minimap_sea_0_0.png … minimap_sea_2_3.png
+│  ├─ minimap_sea_0_0.png … minimap_sea_2_1.png
 │  └─ README.txt         how to pack the PNGs into minimap.ytd with OpenIV
 └─ html/                 optional NUI overlay
 ```
@@ -121,6 +121,6 @@ Browsers cannot write `.ytd` texture dictionaries, so the exporter ships ready-t
 
 ## Notes
 
-- Base map presets are generated procedurally at runtime (stylized San Andreas silhouette) to avoid shipping copyrighted Rockstar textures. To use the **real GTA V maps**, drop your own textures (a single image or `minimap_sea_X_Y.png` tiles) into `public/maps/Color/`, `original/`, `satellite/`, `real-map/`, `real-map-down/` — the build indexes them and they replace the stylized presets automatically. See [`public/maps/README.md`](public/maps/README.md) for details, or upload a minimap per project via *Custom Upload*.
+- Base map presets are generated procedurally at runtime (stylized San Andreas silhouette) to avoid shipping copyrighted Rockstar textures. To use the **real GTA V maps**, drop your own textures (a single image or the `minimap_sea_*.dds` / `.png` tiles exported from OpenIV) into `public/maps/Color/`, `original/`, `satellite/`, `real-map/`, `real-map-down/` — the build decodes, stitches and optimizes them, and they replace the stylized presets automatically. See [`public/maps/README.md`](public/maps/README.md) for details, or upload a minimap per project via *Custom Upload*.
 - Payments are not wired up; the Supporter upgrade in the dashboard simulates a successful checkout so the plan logic can be tested.
 - FiveM Map Studio is a community tool and is not affiliated with Rockstar Games or Cfx.re.

@@ -23,5 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 
-# Generated at build time from public/maps/*
+# Generated at build time from public/maps/* (see scripts/build-maps.mjs)
 public/maps/manifest.json
+public/maps/_generated/
