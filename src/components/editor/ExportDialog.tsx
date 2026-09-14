@@ -189,8 +189,16 @@ ${includeTextures ? `├─ stream/ minimap_full.png${splitTiles ? ' · minimap_
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={run} loading={busy} disabled={locked}>
-            {locked ? <Lock className="h-4 w-4" /> : <Download className="h-4 w-4" />} Export FiveM Resource
+          <Button onClick={run} loading={busy} disabled={locked} variant={locked ? 'secondary' : 'primary'}>
+            {locked ? (
+              <>
+                <Lock className="h-4 w-4" /> Limit reached
+              </>
+            ) : (
+              <>
+                <Download className="h-4 w-4" /> Export FiveM Resource
+              </>
+            )}
           </Button>
         </div>
       </div>
