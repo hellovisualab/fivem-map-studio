@@ -11,7 +11,7 @@ import type {
   ZoneType,
 } from '@/types'
 import { DEFAULT_WORLD, MARKER_ICONS, ZONE_TYPES } from './constants'
-import { PRESET_SIZE } from './basemaps'
+import { PRESET_SEA, PRESET_SIZE } from './basemaps'
 import { uid } from './utils'
 
 const base = (name: string, x: number, y: number) => ({
@@ -122,8 +122,21 @@ export function createDocument(preset: BaseMapPreset, source?: { src: string; wi
     elements: [],
     world: { ...DEFAULT_WORLD },
     grid: { enabled: false, size: 128 },
-    background: '#0a0a0c',
+    // Procedural presets have a transparent sea; paint it via the background instead.
+    background: preset !== 'custom' && !source?.src ? PRESET_SEA[preset] : '#0a0a0c',
   }
+}
+
+/**
+ * Upgrades documents saved before procedural presets switched to a transparent
+ * sea: the old default background would otherwise render the sea near-black.
+ */
+export function migrateDocument(doc: MapDocument): MapDocument {
+  const { preset, src } = doc.baseMap
+  if (preset !== 'custom' && !src && doc.background === '#0a0a0c') {
+    return { ...doc, background: PRESET_SEA[preset] }
+  }
+  return doc
 }
 
 export function cloneElement(el: MapElement, dx = 24, dy = 24): MapElement {

@@ -305,7 +305,11 @@ function drawRoads(ctx: CanvasRenderingContext2D, w: number, h: number, style: S
   ctx.restore()
 }
 
-function render(preset: Exclude<BaseMapPreset, 'custom'>): string {
+/**
+ * @param transparentSea When true the sea is left as alpha (like real minimap
+ *   textures), so glow / clipping effects can follow the island silhouette.
+ */
+function render(preset: Exclude<BaseMapPreset, 'custom'>, transparentSea: boolean): string {
   const { width: w, height: h } = PRESET_SIZE
   const style = STYLES[preset]
   const canvas = document.createElement('canvas')
@@ -315,11 +319,13 @@ function render(preset: Exclude<BaseMapPreset, 'custom'>): string {
   const rnd = seeded(1337)
 
   // Sea
-  const seaGrad = ctx.createLinearGradient(0, 0, 0, h)
-  seaGrad.addColorStop(0, style.sea)
-  seaGrad.addColorStop(1, style.seaDeep)
-  ctx.fillStyle = seaGrad
-  ctx.fillRect(0, 0, w, h)
+  if (!transparentSea) {
+    const seaGrad = ctx.createLinearGradient(0, 0, 0, h)
+    seaGrad.addColorStop(0, style.sea)
+    seaGrad.addColorStop(1, style.seaDeep)
+    ctx.fillStyle = seaGrad
+    ctx.fillRect(0, 0, w, h)
+  }
 
   // Coast glow
   if (style.coastGlow) {
@@ -377,9 +383,16 @@ function render(preset: Exclude<BaseMapPreset, 'custom'>): string {
 
   // Lake
   ctx.save()
-  ctx.fillStyle = style.lake
-  smoothPath(ctx, LAKE, w, h, true)
-  ctx.fill()
+  if (transparentSea) {
+    ctx.globalCompositeOperation = 'destination-out'
+    smoothPath(ctx, LAKE, w, h, true)
+    ctx.fill()
+    ctx.globalCompositeOperation = 'source-over'
+  } else {
+    ctx.fillStyle = style.lake
+    smoothPath(ctx, LAKE, w, h, true)
+    ctx.fill()
+  }
   ctx.strokeStyle = style.sand
   ctx.lineWidth = 6
   smoothPath(ctx, LAKE, w, h, true)
@@ -390,33 +403,55 @@ function render(preset: Exclude<BaseMapPreset, 'custom'>): string {
 
   // Vignette for satellite
   if (preset === 'satellite') {
+    ctx.save()
+    if (transparentSea) ctx.globalCompositeOperation = 'source-atop'
     const v = ctx.createRadialGradient(w / 2, h / 2, h * 0.3, w / 2, h / 2, h * 0.75)
     v.addColorStop(0, 'rgba(0,0,0,0)')
     v.addColorStop(1, 'rgba(0,0,0,0.45)')
     ctx.fillStyle = v
     ctx.fillRect(0, 0, w, h)
+    ctx.restore()
   }
 
-  return canvas.toDataURL(style.format, 0.9)
+  return canvas.toDataURL(transparentSea ? 'image/png' : style.format, 0.9)
+}
+
+/** Sea color of each procedural preset; used as the document background so the look is unchanged. */
+export const PRESET_SEA: Record<Exclude<BaseMapPreset, 'custom'>, string> = {
+  color: STYLES.color.sea,
+  original: STYLES.original.sea,
+  satellite: STYLES.satellite.sea,
+  realmap: STYLES.realmap.sea,
 }
 
 const cache = new Map<string, string>()
 
-/** Returns a data URL for a preset base map, rendering it on first use. */
+/** Document texture: island with a transparent sea, rendered on first use. */
 export function getPresetMap(preset: Exclude<BaseMapPreset, 'custom'>): string {
-  const hit = cache.get(preset)
+  const key = `${preset}:alpha`
+  const hit = cache.get(key)
   if (hit) return hit
-  const url = render(preset)
-  cache.set(preset, url)
+  const url = render(preset, true)
+  cache.set(key, url)
+  return url
+}
+
+/** Card / backdrop preview with the sea painted in. */
+export function getPresetPreview(preset: Exclude<BaseMapPreset, 'custom'>): string {
+  const key = `${preset}:opaque`
+  const hit = cache.get(key)
+  if (hit) return hit
+  const url = render(preset, false)
+  cache.set(key, url)
   return url
 }
 
 export function getPresetMapAsync(preset: Exclude<BaseMapPreset, 'custom'>): Promise<string> {
   return new Promise((resolve) => {
-    const hit = cache.get(preset)
+    const hit = cache.get(`${preset}:opaque`)
     if (hit) return resolve(hit)
     // Defer so the UI can paint a loading state before the heavy render.
-    setTimeout(() => resolve(getPresetMap(preset)), 20)
+    setTimeout(() => resolve(getPresetPreview(preset)), 20)
   })
 }
 

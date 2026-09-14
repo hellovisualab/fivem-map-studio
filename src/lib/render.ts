@@ -1,6 +1,8 @@
-import type { MapDocument, MapElement } from '@/types'
+import type { MapDocument, MapElement, TextElement } from '@/types'
 import { getPresetMap } from './basemaps'
 import { MARKER_PATHS } from './icons'
+import { loadDocumentFonts } from './fonts'
+import { composeBaseMap, drawStyledBase, effectsOf, isClipped, styleOf, toComposite } from './mapStyle'
 import { loadImage, rgba } from './utils'
 
 export function resolveBaseSrc(doc: MapDocument): string {
@@ -18,25 +20,47 @@ const cachedImage = (src: string) => {
   return p
 }
 
-function drawElement(ctx: CanvasRenderingContext2D, el: MapElement, images: Map<string, HTMLImageElement>) {
+const textContent = (el: TextElement) => (el.uppercase ? el.text.toUpperCase() : el.text)
+
+/** Konva draws multi-line text line by line from the top; mirror that here. */
+function drawTextLines(ctx: CanvasRenderingContext2D, el: TextElement) {
+  const lines = textContent(el).split('\n')
+  const lineHeight = el.fontSize
+  ctx.font = `${el.fontStyle} ${el.fontSize}px "${el.fontFamily}", Inter, sans-serif`
+  ctx.textBaseline = 'top'
+  if ('letterSpacing' in ctx) (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = `${el.letterSpacing ?? 0}px`
+  lines.forEach((line, i) => {
+    const y = i * lineHeight
+    if (el.stroke && el.strokeWidth) {
+      ctx.lineJoin = 'round'
+      ctx.strokeStyle = el.stroke
+      ctx.lineWidth = el.strokeWidth * 2
+      ctx.strokeText(line, 0, y)
+    }
+    ctx.fillStyle = el.fill
+    ctx.fillText(line, 0, y)
+  })
+}
+
+function drawElement(ctx: CanvasRenderingContext2D, el: MapElement, images: Map<string, HTMLImageElement>, pixelScale = 1) {
   if (!el.visible) return
+  const fx = effectsOf(el)
   ctx.save()
   ctx.globalAlpha = el.opacity
+  ctx.globalCompositeOperation = toComposite(fx.blend)
+  if (fx.shadowEnabled) {
+    // Shadow attributes ignore the CTM, so scale them by hand to match the editor.
+    ctx.shadowColor = rgba(fx.shadowColor, fx.shadowOpacity)
+    ctx.shadowBlur = fx.shadowBlur * pixelScale
+    ctx.shadowOffsetX = fx.shadowOffsetX * pixelScale
+    ctx.shadowOffsetY = fx.shadowOffsetY * pixelScale
+  }
   ctx.translate(el.x, el.y)
   ctx.rotate((el.rotation * Math.PI) / 180)
 
   switch (el.type) {
     case 'text': {
-      ctx.font = `${el.fontStyle} ${el.fontSize}px "${el.fontFamily}", sans-serif`
-      ctx.textBaseline = 'top'
-      if (el.stroke && el.strokeWidth) {
-        ctx.lineJoin = 'round'
-        ctx.strokeStyle = el.stroke
-        ctx.lineWidth = el.strokeWidth * 2
-        ctx.strokeText(el.text, 0, 0)
-      }
-      ctx.fillStyle = el.fill
-      ctx.fillText(el.text, 0, 0)
+      drawTextLines(ctx, el)
       break
     }
     case 'image': {
@@ -193,28 +217,36 @@ export async function renderDocument(doc: MapDocument, opts: RenderOptions = {})
     }),
   )
 
+  await loadDocumentFonts(doc)
+
+  const clipped = doc.elements.filter(isClipped)
+  const free = doc.elements.filter((e) => !isClipped(e))
+
   if (!opts.overlayOnly) {
-    ctx.fillStyle = doc.background
-    ctx.fillRect(0, 0, width, height)
+    let base: HTMLImageElement | null = null
     const baseSrc = resolveBaseSrc(doc)
     if (baseSrc) {
       try {
-        const base = await cachedImage(baseSrc)
-        ctx.save()
-        ctx.filter = doc.baseMap.brightness !== 1 ? `brightness(${doc.baseMap.brightness})` : 'none'
-        ctx.drawImage(base, 0, 0, width, height)
-        ctx.restore()
+        base = await cachedImage(baseSrc)
       } catch {
         /* keep background */
       }
     }
-    if (doc.baseMap.tintOpacity > 0) {
-      ctx.fillStyle = rgba(doc.baseMap.tint, doc.baseMap.tintOpacity)
+    if (base) {
+      const styled = composeBaseMap(base, width, height, styleOf(doc.baseMap))
+      drawStyledBase(ctx, styled, width, height, doc.background, (c) => {
+        for (const el of clipped) drawElement(c, el, images, scale)
+      })
+    } else if (doc.background !== 'transparent') {
+      ctx.fillStyle = doc.background
       ctx.fillRect(0, 0, width, height)
     }
+  } else {
+    // Without the base texture there is nothing to clip against; draw them plainly.
+    for (const el of clipped) drawElement(ctx, el, images, scale)
   }
 
-  for (const el of doc.elements) drawElement(ctx, el, images)
+  for (const el of free) drawElement(ctx, el, images, scale)
   return canvas
 }
 

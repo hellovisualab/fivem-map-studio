@@ -22,6 +22,50 @@ export type FontFamily =
   | 'Verdana'
   | 'Trebuchet MS'
   | 'Times New Roman'
+  | 'Bebas Neue'
+  | 'Anton'
+  | 'Oswald'
+  | 'Teko'
+  | 'Russo One'
+  | 'Black Ops One'
+  | 'Bangers'
+  | 'Righteous'
+  | 'Permanent Marker'
+  | 'Pacifico'
+  | 'Great Vibes'
+  | 'Cinzel'
+
+export type BlendMode =
+  | 'normal'
+  | 'multiply'
+  | 'screen'
+  | 'overlay'
+  | 'darken'
+  | 'lighten'
+  | 'color-dodge'
+  | 'color-burn'
+  | 'hard-light'
+  | 'soft-light'
+  | 'difference'
+  | 'exclusion'
+  | 'hue'
+  | 'saturation'
+  | 'color'
+  | 'luminosity'
+
+/** Photoshop-like layer effects available on every element. */
+export interface ElementEffects {
+  blend: BlendMode
+  /** Drop shadow / outer glow. */
+  shadowEnabled: boolean
+  shadowColor: string
+  shadowBlur: number
+  shadowOffsetX: number
+  shadowOffsetY: number
+  shadowOpacity: number
+  /** Masks the element to the base-map silhouette (non-transparent pixels). */
+  clipToMap: boolean
+}
 
 export interface BaseElement {
   id: string
@@ -32,6 +76,7 @@ export interface BaseElement {
   y: number
   rotation: number
   opacity: number
+  effects?: Partial<ElementEffects>
 }
 
 export interface TextElement extends BaseElement {
@@ -43,6 +88,8 @@ export interface TextElement extends BaseElement {
   fontStyle: 'normal' | 'bold' | 'italic' | 'bold italic'
   stroke?: string
   strokeWidth?: number
+  letterSpacing?: number
+  uppercase?: boolean
 }
 
 export interface ImageElement extends BaseElement {
@@ -90,7 +137,47 @@ export type ElementType = MapElement['type']
 
 export type BaseMapPreset = 'color' | 'original' | 'satellite' | 'realmap' | 'custom'
 
-export interface BaseMap {
+export interface GradientOverlay {
+  enabled: boolean
+  from: string
+  to: string
+  /** Degrees, 0 = top → bottom. */
+  angle: number
+  opacity: number
+  blend: BlendMode
+}
+
+export interface MapGlow {
+  enabled: boolean
+  color: string
+  /** Blur radius in map pixels. */
+  size: number
+  /** 1–3 passes; more = denser aura. */
+  strength: number
+  opacity: number
+}
+
+/** Color grading + overlays applied to the base-map texture. */
+export interface BaseMapStyle {
+  brightness: number
+  contrast: number
+  saturation: number
+  /** Hue rotation in degrees. */
+  hue: number
+  grayscale: number
+  invert: boolean
+  tint: string
+  tintOpacity: number
+  tintBlend: BlendMode
+  gradient: GradientOverlay
+  glow: MapGlow
+  /** Color key that turns the sea transparent on opaque textures (null = use the texture alpha). */
+  keyColor: string | null
+  /** 0–1 similarity tolerance for the color key. */
+  keyTolerance: number
+}
+
+export interface BaseMap extends Partial<BaseMapStyle> {
   preset: BaseMapPreset
   /** Data URL or remote URL. Empty when the preset is procedurally generated on load. */
   src: string
@@ -117,6 +204,7 @@ export interface MapDocument {
     enabled: boolean
     size: number
   }
+  /** Sea / canvas color, or the literal 'transparent' for alpha exports. */
   background: string
 }
 

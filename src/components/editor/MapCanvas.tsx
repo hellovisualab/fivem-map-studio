@@ -9,15 +9,19 @@ import { canvasApi } from '@/lib/canvasApi'
 import { MAX_ZOOM, MIN_ZOOM } from '@/lib/constants'
 import { createImage, createLine, createMarker, createRectZone, createText, createZone } from '@/lib/elements'
 import { resolveBaseSrc } from '@/lib/render'
+import { isClipped } from '@/lib/mapStyle'
+import { useStyledBase } from '@/hooks/useStyledBase'
 import { getData } from '@/lib/data'
-import { clamp, loadImage, readFileAsDataURL, rgba } from '@/lib/utils'
+import { clamp, loadImage, readFileAsDataURL } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
-import type { MapElement } from '@/types'
+import type { BaseMap, MapElement } from '@/types'
 import { ElementNode, type NodeHandlers } from './nodes'
 
 type Draft =
   | { kind: 'rect'; x0: number; y0: number; x1: number; y1: number }
   | { kind: 'poly'; points: number[]; cursor: { x: number; y: number } | null }
+
+const EMPTY_BASE: BaseMap = { preset: 'custom', src: '', width: 1, height: 1, tint: '#000000', tintOpacity: 0, brightness: 1 }
 
 const applyColor = (el: MapElement, color: string): Partial<MapElement> => {
   switch (el.type) {
@@ -76,6 +80,9 @@ export function MapCanvas() {
 
   const baseSrc = doc ? resolveBaseSrc(doc) : ''
   const [baseImg] = useImage(baseSrc, 'anonymous')
+  const styled = useStyledBase(baseImg, doc?.baseMap ?? EMPTY_BASE)
+  const clippedElements = useMemo(() => doc?.elements.filter(isClipped) ?? [], [doc?.elements])
+  const freeElements = useMemo(() => doc?.elements.filter((e) => !isClipped(e)) ?? [], [doc?.elements])
 
   // Container size tracking
   useEffect(() => {
@@ -521,23 +528,51 @@ export function MapCanvas() {
           onDblClick={onDblClick}
           onDblTap={onDblClick}
         >
-          {/* Base map */}
-          <Layer listening={false}>
-            <Rect x={0} y={0} width={mapW} height={mapH} fill={doc.background} shadowColor="black" shadowBlur={40} shadowOpacity={0.6} />
-            {baseImg && <KImage image={baseImg} x={0} y={0} width={mapW} height={mapH} />}
-            {doc.baseMap.brightness !== 1 && (
-              <Rect
-                x={0}
-                y={0}
-                width={mapW}
-                height={mapH}
-                fill={doc.baseMap.brightness < 1 ? '#000000' : '#ffffff'}
-                opacity={doc.baseMap.brightness < 1 ? 1 - doc.baseMap.brightness : (doc.baseMap.brightness - 1) * 0.5}
+          {/*
+            Base map. Draw order matters for the Photoshop-style effects:
+            island → elements clipped to the map (with blend modes) → destination-in
+            silhouette mask → glow and background behind (destination-over) → grid.
+          */}
+          <Layer>
+            {styled ? (
+              <>
+                <KImage image={styled.island} x={0} y={0} width={mapW} height={mapH} listening={false} />
+                {clippedElements.map((el) => (
+                  <ElementNode key={el.id} el={el} h={handlers} />
+                ))}
+                {clippedElements.length > 0 && <KImage image={styled.mask} x={0} y={0} width={mapW} height={mapH} globalCompositeOperation="destination-in" listening={false} />}
+                {styled.glow && <KImage image={styled.glow} x={0} y={0} width={mapW} height={mapH} globalCompositeOperation="destination-over" listening={false} />}
+              </>
+            ) : (
+              baseImg && <KImage image={baseImg} x={0} y={0} width={mapW} height={mapH} listening={false} />
+            )}
+            <Rect
+              x={0}
+              y={0}
+              width={mapW}
+              height={mapH}
+              fill={doc.background === 'transparent' ? '#101014' : doc.background}
+              globalCompositeOperation="destination-over"
+              listening={false}
+            />
+            {doc.background === 'transparent' && (
+              <Shape
+                listening={false}
+                globalCompositeOperation="destination-over"
+                sceneFunc={(ctx, shape) => {
+                  // Checkerboard hint that the sea will export with alpha.
+                  const s = Math.max(24, Math.round(mapW / 24))
+                  ctx.fillStyle = '#1a1a20'
+                  for (let y = 0; y < mapH; y += s)
+                    for (let x = (y / s) % 2 === 0 ? 0 : s; x < mapW; x += s * 2) ctx.fillRect(x, y, Math.min(s, mapW - x), Math.min(s, mapH - y))
+                  ctx.fillStrokeShape(shape)
+                }}
               />
             )}
-            {doc.baseMap.tintOpacity > 0 && <Rect x={0} y={0} width={mapW} height={mapH} fill={rgba(doc.baseMap.tint, doc.baseMap.tintOpacity)} />}
+            <Rect x={0} y={0} width={mapW} height={mapH} fill="#000" shadowColor="black" shadowBlur={40} shadowOpacity={0.6} globalCompositeOperation="destination-over" listening={false} />
             {doc.grid.enabled && (
               <Shape
+                listening={false}
                 sceneFunc={(ctx, shape) => {
                   const g = doc.grid.size
                   ctx.beginPath()
@@ -559,7 +594,7 @@ export function MapCanvas() {
 
           {/* Elements */}
           <Layer>
-            {doc.elements.map((el) => (
+            {freeElements.map((el) => (
               <ElementNode key={el.id} el={el} h={handlers} />
             ))}
             <Transformer

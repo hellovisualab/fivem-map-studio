@@ -12,8 +12,15 @@ A visual minimap editor for FiveM (GTA V) servers. Design custom minimaps in the
 - **Canvas editor (Konva)** – zoom (wheel / pinch), pan (hand tool, space-drag, middle mouse), optional grid, live pixel + GTA world coordinates
 - **Tools** – select, move, text, image, rectangle zone, line, polygon zone, marker, paint color, undo / redo, delete
 - **Layers panel** – show/hide, lock, drag to reorder, bring forward / send backward, search
+- **Map styles & effects (Photoshop-like)**
+  - One-click style presets: Clean, Neon Purple, Inferno, Blood, Ice, Miami, Gold, Noir, Toxic
+  - Color grading: brightness, contrast, saturation, hue shift, grayscale, invert
+  - Color tint and two-color gradient overlay, each with a blend mode (multiply, overlay, screen, soft light, color…)
+  - Outer glow / aura around the island silhouette, with color, size, density and opacity
+  - Sea removal by color key for opaque textures, and transparent background for alpha exports
+  - Per-element effects: blend mode, drop shadow / glow, and **clip to map shape** (flags, textures and zones masked to the island)
 - **Elements**
-  - Text: content, size, font, style, color, outline, rotation
+  - Text: content, size, 20 fonts (Bebas Neue, Anton, Bangers, Permanent Marker, Great Vibes, Cinzel…), style, letter spacing, uppercase, color, outline, shadow, rotation, quick styles
   - Zones: gang / police / safe / custom with color, transparency, border, name, description
   - Images: PNG / JPG / WebP with scale, rotate, move
   - Lines: width, dashed, arrow head

@@ -1,16 +1,19 @@
-import { useRef, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Copy, Grid3X3, Trash2, Upload } from 'lucide-react'
+import { Copy, Grid3X3, Pipette, Sparkles, Trash2, Upload } from 'lucide-react'
 import { useEditor } from '@/store/useEditor'
 import { useAuth } from '@/store/useAuth'
-import { FONTS, MARKER_ICONS, PALETTE, ZONE_TYPES } from '@/lib/constants'
+import { FONTS, MARKER_ICONS, PALETTE, STYLE_PRESETS, TEXT_PRESETS, ZONE_TYPES } from '@/lib/constants'
 import { canvasToWorld, worldToCanvas } from '@/lib/geometry'
 import { getData } from '@/lib/data'
 import { importMinimapFiles } from '@/lib/importer'
-import { cn, round } from '@/lib/utils'
+import { BLEND_MODES, effectsOf, sampleCornerColor, styleOf } from '@/lib/mapStyle'
+import { resolveBaseSrc } from '@/lib/render'
+import { loadFont } from '@/lib/fonts'
+import { cn, loadImage, round } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
 import { Button } from '@/components/ui/Button'
-import type { MapElement, MarkerIcon, ZoneType } from '@/types'
+import type { BaseMapStyle, BlendMode, ElementEffects, MapElement, MarkerIcon, TextElement, ZoneType } from '@/types'
 import { MarkerGlyph } from './Toolbar'
 
 function Field({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
@@ -76,12 +79,291 @@ function Slider({ value, onChange, min, max, step = 0.01 }: { value: number; onC
   return <input type="range" className="w-full" min={min} max={max} step={step} value={value} onChange={(e) => onChange(parseFloat(e.target.value))} />
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({ title, children, action }: { title: string; children: ReactNode; action?: ReactNode }) {
   return (
     <div className="border-b border-ink-700/60 px-3 py-3 last:border-b-0">
-      <p className="mb-2 text-[11px] font-semibold tracking-wider text-ink-500 uppercase">{title}</p>
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-[11px] font-semibold tracking-wider text-ink-500 uppercase">{title}</p>
+        {action}
+      </div>
       <div className="space-y-2.5">{children}</div>
     </div>
+  )
+}
+
+function Toggle({ checked, onChange, label, icon }: { checked: boolean; onChange: (v: boolean) => void; label: ReactNode; icon?: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="flex items-center gap-2 text-xs text-ink-300">
+        {icon}
+        {label}
+      </span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        className={cn('relative h-5 w-9 shrink-0 rounded-full transition', checked ? 'bg-brand-500' : 'bg-ink-600')}
+      >
+        <span className={cn('absolute top-0.5 h-4 w-4 rounded-full bg-white transition', checked ? 'left-4.5' : 'left-0.5')} />
+      </button>
+    </div>
+  )
+}
+
+function BlendSelect({ value, onChange }: { value: BlendMode; onChange: (v: BlendMode) => void }) {
+  return (
+    <select className="field-sm" value={value} onChange={(e) => onChange(e.target.value as BlendMode)}>
+      {BLEND_MODES.map((b) => (
+        <option key={b.id} value={b.id}>
+          {b.label}
+        </option>
+      ))}
+    </select>
+  )
+}
+
+const pct = (v: number) => `${Math.round(v * 100)}%`
+
+/** Photoshop-style color grading, overlays and aura for the base texture. */
+function MapStyleSections() {
+  const doc = useEditor((s) => s.doc)!
+  const { updateDocument, commit } = useEditor.getState()
+  const style = styleOf(doc.baseMap)
+  const set = (patch: Partial<BaseMapStyle>) => updateDocument({ baseMap: { ...doc.baseMap, ...patch } })
+  const setGradient = (patch: Partial<BaseMapStyle['gradient']>) => set({ gradient: { ...style.gradient, ...patch } })
+  const setGlow = (patch: Partial<BaseMapStyle['glow']>) => set({ glow: { ...style.glow, ...patch } })
+  const [sampling, setSampling] = useState(false)
+
+  const applyPreset = (patch: Partial<BaseMapStyle>) => {
+    commit((d) => {
+      d.baseMap = { ...d.baseMap, ...patch }
+    })
+  }
+
+  const pickSea = async () => {
+    setSampling(true)
+    try {
+      const img = await loadImage(resolveBaseSrc(doc))
+      const c = sampleCornerColor(img, doc.baseMap.width, doc.baseMap.height)
+      if (c === 'transparent') {
+        toast.info('Sea is already transparent', 'This texture has an alpha channel; no color key needed.')
+        set({ keyColor: null })
+      } else {
+        set({ keyColor: c })
+        toast.success('Sea color sampled', c)
+      }
+    } catch (e) {
+      toast.error('Could not sample texture', (e as Error).message)
+    } finally {
+      setSampling(false)
+    }
+  }
+
+  return (
+    <>
+      <Section
+        title="Style presets"
+        action={
+          <button className="text-[11px] text-ink-400 hover:text-ink-200" onClick={() => applyPreset(STYLE_PRESETS[0].style)}>
+            Reset
+          </button>
+        }
+      >
+        <div className="grid grid-cols-3 gap-1.5">
+          {STYLE_PRESETS.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => applyPreset(p.style)}
+              className="group flex flex-col items-center gap-1 rounded-lg border border-ink-700 bg-ink-850 px-1 py-1.5 text-[10px] text-ink-300 transition hover:border-brand-500/60 hover:text-ink-100"
+              title={p.name}
+            >
+              <span
+                className="h-6 w-full rounded-md shadow-inner transition group-hover:scale-105"
+                style={{ background: `linear-gradient(135deg, ${p.swatch[0]}, ${p.swatch[1]})`, boxShadow: `0 0 12px ${p.swatch[0]}55` }}
+              />
+              {p.name}
+            </button>
+          ))}
+        </div>
+        <p className="text-[11px] text-ink-500">Presets set the grading, tint, gradient and glow below. Tweak anything afterwards.</p>
+      </Section>
+
+      <Section title="Color grading">
+        <Field label={`Brightness · ${pct(style.brightness)}`}>
+          <Slider value={style.brightness} min={0.2} max={1.8} onChange={(v) => set({ brightness: v })} />
+        </Field>
+        <Field label={`Contrast · ${pct(style.contrast)}`}>
+          <Slider value={style.contrast} min={0.4} max={2} onChange={(v) => set({ contrast: v })} />
+        </Field>
+        <Field label={`Saturation · ${pct(style.saturation)}`}>
+          <Slider value={style.saturation} min={0} max={2.5} onChange={(v) => set({ saturation: v })} />
+        </Field>
+        <Field label={`Hue shift · ${Math.round(style.hue)}°`}>
+          <Slider value={style.hue} min={-180} max={180} step={1} onChange={(v) => set({ hue: v })} />
+        </Field>
+        <Field label={`Grayscale · ${pct(style.grayscale)}`}>
+          <Slider value={style.grayscale} min={0} max={1} onChange={(v) => set({ grayscale: v })} />
+        </Field>
+        <Toggle checked={style.invert} onChange={(v) => set({ invert: v })} label="Invert colors" />
+      </Section>
+
+      <Section title="Color tint">
+        <Field label="Color">
+          <ColorInput value={style.tint} onChange={(v) => set({ tint: v })} />
+        </Field>
+        <div className="grid grid-cols-2 gap-2">
+          <Field label={`Strength · ${pct(style.tintOpacity)}`}>
+            <Slider value={style.tintOpacity} min={0} max={1} onChange={(v) => set({ tintOpacity: v })} />
+          </Field>
+          <Field label="Blend">
+            <BlendSelect value={style.tintBlend} onChange={(v) => set({ tintBlend: v })} />
+          </Field>
+        </div>
+      </Section>
+
+      <Section title="Gradient overlay" action={<Toggle checked={style.gradient.enabled} onChange={(v) => setGradient({ enabled: v })} label="" />}>
+        {style.gradient.enabled && (
+          <>
+            <div className="h-3 w-full rounded-full" style={{ background: `linear-gradient(${style.gradient.angle}deg, ${style.gradient.from}, ${style.gradient.to})` }} />
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="From">
+                <div className="flex items-center gap-2">
+                  <input type="color" value={style.gradient.from} onChange={(e) => setGradient({ from: e.target.value })} />
+                  <input className="field-sm font-mono" value={style.gradient.from} onChange={(e) => setGradient({ from: e.target.value })} />
+                </div>
+              </Field>
+              <Field label="To">
+                <div className="flex items-center gap-2">
+                  <input type="color" value={style.gradient.to} onChange={(e) => setGradient({ to: e.target.value })} />
+                  <input className="field-sm font-mono" value={style.gradient.to} onChange={(e) => setGradient({ to: e.target.value })} />
+                </div>
+              </Field>
+            </div>
+            <Field label={`Angle · ${Math.round(style.gradient.angle)}°`}>
+              <Slider value={style.gradient.angle} min={0} max={360} step={1} onChange={(v) => setGradient({ angle: v })} />
+            </Field>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label={`Opacity · ${pct(style.gradient.opacity)}`}>
+                <Slider value={style.gradient.opacity} min={0} max={1} onChange={(v) => setGradient({ opacity: v })} />
+              </Field>
+              <Field label="Blend">
+                <BlendSelect value={style.gradient.blend} onChange={(v) => setGradient({ blend: v })} />
+              </Field>
+            </div>
+          </>
+        )}
+      </Section>
+
+      <Section title="Outer glow" action={<Toggle checked={style.glow.enabled} onChange={(v) => setGlow({ enabled: v })} label="" />}>
+        {style.glow.enabled && (
+          <>
+            <Field label="Color">
+              <ColorInput value={style.glow.color} onChange={(v) => setGlow({ color: v })} />
+            </Field>
+            <Field label={`Size · ${Math.round(style.glow.size)}px`}>
+              <Slider value={style.glow.size} min={10} max={400} step={2} onChange={(v) => setGlow({ size: v })} />
+            </Field>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label={`Density · ${style.glow.strength}`}>
+                <Slider value={style.glow.strength} min={1} max={3} step={1} onChange={(v) => setGlow({ strength: v })} />
+              </Field>
+              <Field label={`Opacity · ${pct(style.glow.opacity)}`}>
+                <Slider value={style.glow.opacity} min={0} max={1} onChange={(v) => setGlow({ opacity: v })} />
+              </Field>
+            </div>
+          </>
+        )}
+        {!style.keyColor && (
+          <p className="text-[11px] text-ink-500">The glow follows the map silhouette. If your texture has an opaque sea, remove it below first.</p>
+        )}
+      </Section>
+
+      <Section title="Sea & background">
+        <Toggle checked={style.keyColor !== null} onChange={(v) => set({ keyColor: v ? style.keyColor ?? '#0a0a0c' : null })} label="Remove sea (color key)" />
+        {style.keyColor !== null && (
+          <>
+            <div className="flex items-center gap-2">
+              <input type="color" value={/^#[0-9a-f]{6}$/i.test(style.keyColor) ? style.keyColor : '#000000'} onChange={(e) => set({ keyColor: e.target.value })} />
+              <input className="field-sm font-mono" value={style.keyColor} onChange={(e) => set({ keyColor: e.target.value })} />
+              <Button variant="secondary" size="icon" onClick={pickSea} loading={sampling} title="Sample the corner pixel">
+                <Pipette className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+            <Field label={`Tolerance · ${pct(style.keyTolerance)}`}>
+              <Slider value={style.keyTolerance} min={0.01} max={0.6} onChange={(v) => set({ keyTolerance: v })} />
+            </Field>
+          </>
+        )}
+        <Toggle
+          checked={doc.background === 'transparent'}
+          onChange={(v) => updateDocument({ background: v ? 'transparent' : '#0a0a0c' })}
+          label="Transparent background (export with alpha)"
+        />
+        {doc.background !== 'transparent' && (
+          <Field label="Background color">
+            <ColorInput value={doc.background} onChange={(v) => updateDocument({ background: v })} />
+          </Field>
+        )}
+      </Section>
+    </>
+  )
+}
+
+/** Blend mode, drop shadow / glow and map clipping for a single element. */
+function EffectsSection({ el }: { el: MapElement }) {
+  const { updateElement } = useEditor.getState()
+  const fx = effectsOf(el)
+  const set = (patch: Partial<ElementEffects>) => updateElement(el.id, { effects: { ...el.effects, ...patch } })
+  const clippable = el.type === 'image' || el.type === 'zone' || el.type === 'text'
+  return (
+    <Section title="Effects">
+      <Field label="Blend mode">
+        <BlendSelect value={fx.blend} onChange={(v) => set({ blend: v })} />
+      </Field>
+      {clippable && (
+        <Toggle
+          checked={fx.clipToMap}
+          onChange={(v) => set({ clipToMap: v })}
+          label={
+            <span>
+              Clip to map shape
+              <span className="block text-[10px] text-ink-500">Masks the layer to the island silhouette</span>
+            </span>
+          }
+        />
+      )}
+      <Toggle checked={fx.shadowEnabled} onChange={(v) => set({ shadowEnabled: v })} label="Shadow / glow" icon={<Sparkles className="h-3.5 w-3.5" />} />
+      {fx.shadowEnabled && (
+        <>
+          <Field label="Color">
+            <ColorInput value={fx.shadowColor} onChange={(v) => set({ shadowColor: v })} />
+          </Field>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Blur">
+              <NumberInput value={fx.shadowBlur} min={0} step={1} onChange={(v) => set({ shadowBlur: Math.max(0, v) })} />
+            </Field>
+            <Field label={`Opacity`}>
+              <NumberInput value={round(fx.shadowOpacity * 100, 0)} min={0} max={100} suffix="%" onChange={(v) => set({ shadowOpacity: Math.max(0, Math.min(1, v / 100)) })} />
+            </Field>
+            <Field label="Offset X">
+              <NumberInput value={fx.shadowOffsetX} step={1} onChange={(v) => set({ shadowOffsetX: v })} />
+            </Field>
+            <Field label="Offset Y">
+              <NumberInput value={fx.shadowOffsetY} step={1} onChange={(v) => set({ shadowOffsetY: v })} />
+            </Field>
+          </div>
+          <div className="flex gap-1.5">
+            <Button variant="secondary" size="sm" className="flex-1" onClick={() => set({ shadowBlur: 0, shadowOffsetX: 4, shadowOffsetY: 4, shadowOpacity: 1 })}>
+              Hard shadow
+            </Button>
+            <Button variant="secondary" size="sm" className="flex-1" onClick={() => set({ shadowBlur: 30, shadowOffsetX: 0, shadowOffsetY: 0, shadowOpacity: 1 })}>
+              Glow
+            </Button>
+          </div>
+        </>
+      )}
+    </Section>
   )
 }
 
@@ -101,8 +383,6 @@ function MapSettings() {
   const { updateDocument, commit } = useEditor.getState()
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const set = (patch: Partial<typeof doc.baseMap>) => updateDocument({ baseMap: { ...doc.baseMap, ...patch } })
-
   return (
     <div className="scrollbar-thin h-full overflow-y-auto">
       <div className="px-3 pt-3 pb-1">
@@ -120,18 +400,6 @@ function MapSettings() {
             {doc.baseMap.width} × {doc.baseMap.height}
           </span>
         </div>
-        <Field label={`Brightness · ${Math.round(doc.baseMap.brightness * 100)}%`}>
-          <Slider value={doc.baseMap.brightness} min={0.2} max={1.8} onChange={(v) => set({ brightness: v })} />
-        </Field>
-        <Field label="Tint">
-          <ColorInput value={doc.baseMap.tint} onChange={(v) => set({ tint: v })} />
-        </Field>
-        <Field label={`Tint strength · ${Math.round(doc.baseMap.tintOpacity * 100)}%`}>
-          <Slider value={doc.baseMap.tintOpacity} min={0} max={0.9} onChange={(v) => set({ tintOpacity: v })} />
-        </Field>
-        <Field label="Background">
-          <ColorInput value={doc.background} onChange={(v) => updateDocument({ background: v })} />
-        </Field>
         <Button variant="outline" size="sm" className="w-full" onClick={() => fileRef.current?.click()}>
           <Upload className="h-3.5 w-3.5" /> Replace base map
         </Button>
@@ -148,7 +416,7 @@ function MapSettings() {
             try {
               const res = await importMinimapFiles(files)
               commit((d) => {
-                d.baseMap = { ...d.baseMap, preset: 'custom', src: res.src, width: res.width, height: res.height }
+                d.baseMap = { ...d.baseMap, preset: 'custom', src: res.src, width: res.width, height: res.height, keyColor: null }
               })
               toast.success('Base map replaced', `${res.width} × ${res.height}px`)
             } catch (err) {
@@ -157,6 +425,7 @@ function MapSettings() {
           }}
         />
       </Section>
+      <MapStyleSections />
       <Section title="Grid">
         <div className="flex items-center justify-between">
           <span className="flex items-center gap-2 text-xs text-ink-300">
@@ -280,6 +549,29 @@ function ElementSettings({ el }: { el: MapElement }) {
         <motion.div key={el.type} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
           {el.type === 'text' && (
             <Section title="Text">
+              <Field label="Quick styles">
+                <div className="grid grid-cols-3 gap-1.5">
+                  {TEXT_PRESETS.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => {
+                        if (p.patch.fontFamily) void loadFont(p.patch.fontFamily)
+                        set({ ...p.patch, effects: { ...el.effects, ...p.patch.effects } } as Partial<MapElement>)
+                      }}
+                      className="truncate rounded-lg border border-ink-700 bg-ink-850 px-1.5 py-1.5 text-xs text-ink-200 transition hover:border-brand-500/60"
+                      style={{
+                        fontFamily: `"${p.patch.fontFamily}", Inter, sans-serif`,
+                        color: p.patch.fill,
+                        textShadow: p.patch.effects?.shadowEnabled ? `0 0 6px ${p.patch.effects.shadowColor}` : undefined,
+                        WebkitTextStroke: p.patch.strokeWidth ? `0.5px ${p.patch.stroke}` : undefined,
+                      }}
+                      title={p.name}
+                    >
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+              </Field>
               <Field label="Content">
                 <textarea className="field-sm resize-none" rows={2} value={el.text} onChange={(e) => set({ text: e.target.value } as Partial<MapElement>)} />
               </Field>
@@ -297,14 +589,34 @@ function ElementSettings({ el }: { el: MapElement }) {
                 </Field>
               </div>
               <Field label="Font">
-                <select className="field-sm" value={el.fontFamily} onChange={(e) => set({ fontFamily: e.target.value } as Partial<MapElement>)} style={{ fontFamily: el.fontFamily }}>
+                <select
+                  className="field-sm"
+                  value={el.fontFamily}
+                  onChange={(e) => {
+                    const f = e.target.value as TextElement['fontFamily']
+                    void loadFont(f)
+                    set({ fontFamily: f } as Partial<MapElement>)
+                  }}
+                  style={{ fontFamily: `"${el.fontFamily}", Inter, sans-serif` }}
+                >
                   {FONTS.map((f) => (
-                    <option key={f} value={f} style={{ fontFamily: f }}>
+                    <option key={f} value={f} style={{ fontFamily: `"${f}", Inter, sans-serif` }}>
                       {f}
                     </option>
                   ))}
                 </select>
               </Field>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Letter spacing">
+                  <NumberInput value={el.letterSpacing ?? 0} step={0.5} suffix="px" onChange={(v) => set({ letterSpacing: v } as Partial<MapElement>)} />
+                </Field>
+                <Field label="Case">
+                  <select className="field-sm" value={el.uppercase ? 'upper' : 'normal'} onChange={(e) => set({ uppercase: e.target.value === 'upper' } as Partial<MapElement>)}>
+                    <option value="normal">As typed</option>
+                    <option value="upper">UPPERCASE</option>
+                  </select>
+                </Field>
+              </div>
               <Field label="Color">
                 <ColorInput value={el.fill} onChange={(v) => set({ fill: v } as Partial<MapElement>)} />
               </Field>
@@ -475,6 +787,8 @@ function ElementSettings({ el }: { el: MapElement }) {
           )}
         </motion.div>
       </AnimatePresence>
+
+      <EffectsSection el={el} />
 
       <Section title="Actions">
         <div className="flex gap-2">
