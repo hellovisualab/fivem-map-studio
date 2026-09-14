@@ -246,8 +246,12 @@ async function buildPreset(preset, files, prevEntry) {
     if (!tileW) {
       tileW = img.width
       tileH = img.height
-      const worst = Math.max(nA, nB) * Math.max(tileW, tileH)
-      factor = Math.max(1, Math.ceil(worst / FULL_MAX_SIDE))
+      // ceil(tile/factor)*axis can overshoot FULL_MAX_SIDE (e.g. 3×ceil(4096/3)=4098),
+      // which blanks the editor canvas on GPUs/browsers with a 4096 texture limit.
+      const axis = Math.max(nA, nB)
+      const side = Math.max(tileW, tileH)
+      factor = 1
+      while (Math.ceil(side / factor) * axis > FULL_MAX_SIDE) factor++
     } else if (img.width !== tileW || img.height !== tileH) {
       entry.errors.push(`${t.name}: tile is ${img.width}×${img.height} but others are ${tileW}×${tileH}`)
       return entry
@@ -260,8 +264,15 @@ async function buildPreset(preset, files, prevEntry) {
   const { cols, rows, placed } = layoutTiles(decoded, orientation)
   const sw = decoded[0].small.width
   const sh = decoded[0].small.height
-  const full = { data: new Uint8ClampedArray(cols * sw * rows * sh * 4), width: cols * sw, height: rows * sh }
+  let full = { data: new Uint8ClampedArray(cols * sw * rows * sh * 4), width: cols * sw, height: rows * sh }
   for (const p of placed) blit(full.data, full.width, p.small.data, p.small.width, p.small.height, p.col * sw, p.row * sh)
+
+  // Final safety clamp if orientation made the other axis the long one.
+  const over = Math.max(full.width, full.height)
+  if (over > FULL_MAX_SIDE) {
+    const clamp = Math.max(1, Math.ceil(over / FULL_MAX_SIDE))
+    full = downsample(full.data, full.width, full.height, clamp)
+  }
 
   const previewFactor = Math.max(1, Math.ceil(Math.max(full.width, full.height) / PREVIEW_MAX_SIDE))
   const preview = downsample(full.data, full.width, full.height, previewFactor)

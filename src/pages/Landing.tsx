@@ -55,17 +55,17 @@ export function Landing() {
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-400" /> New: Live canvas editor
             </span>
             <h1 className="mt-6 text-4xl font-extrabold tracking-tight text-ink-100 sm:text-6xl">
-              FiveM Minimap <span className="bg-gradient-to-r from-brand-300 to-brand-600 bg-clip-text text-transparent">Live Editor</span>
+              FiveM <span className="bg-gradient-to-r from-brand-300 to-brand-600 bg-clip-text text-transparent">Tools</span>
             </h1>
             <p className="mx-auto mt-5 max-w-2xl text-lg text-ink-300">
-              Create custom GTA V minimaps directly in your browser. Add zones, labels, images and custom styles, then export your FiveM resource.
+              Create minimaps, props and handling files, and optimize textures — all in the browser. Export drop-in FiveM resources in one click.
             </p>
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-              <Button size="lg" onClick={() => go('/new')} className="w-full sm:w-auto">
-                Create project <ArrowRight className="h-4 w-4" />
+              <Button size="lg" onClick={() => go('/tools')} className="w-full sm:w-auto">
+                Open tools <ArrowRight className="h-4 w-4" />
               </Button>
-              <Button size="lg" variant="outline" onClick={() => go('/import')} className="w-full sm:w-auto">
-                <Upload className="h-4 w-4" /> Import minimap
+              <Button size="lg" variant="outline" onClick={() => go('/new')} className="w-full sm:w-auto">
+                <Upload className="h-4 w-4" /> Minimap editor
               </Button>
             </div>
             <div className="mt-10 flex items-center justify-center gap-2">

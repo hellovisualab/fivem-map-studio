@@ -24,7 +24,7 @@ export function Logo({ to = '/', compact = false }: { to?: string; compact?: boo
       {!compact && (
         <span className="text-[15px] font-bold tracking-tight">
           <span className="text-brand-400">FiveM</span>
-          <span className="text-ink-100"> Map Studio</span>
+          <span className="text-ink-100"> Tools</span>
         </span>
       )}
     </Link>

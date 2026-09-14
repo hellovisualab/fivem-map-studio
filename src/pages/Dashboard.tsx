@@ -91,6 +91,9 @@ export function Dashboard() {
             <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{user.displayName}</h1>
           </div>
           <div className="flex gap-2">
+            <Button variant="ghost" onClick={() => navigate('/tools')}>
+              All tools
+            </Button>
             <Button variant="outline" onClick={() => navigate('/import')}>
               <Upload className="h-4 w-4" /> Import minimap
             </Button>
