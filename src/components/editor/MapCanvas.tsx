@@ -604,9 +604,9 @@ export function MapCanvas() {
               enabledAnchors={keepRatio ? ['top-left', 'top-right', 'bottom-left', 'bottom-right'] : undefined}
               anchorSize={9}
               anchorCornerRadius={3}
-              anchorStroke="#ff8a1f"
+              anchorStroke="#ec4899"
               anchorFill="#0d0d11"
-              borderStroke="#ff8a1f"
+              borderStroke="#ec4899"
               borderDash={[4, 3]}
               rotateAnchorOffset={24}
               ignoreStroke
@@ -623,7 +623,7 @@ export function MapCanvas() {
                 width={Math.abs(draft.x1 - draft.x0)}
                 height={Math.abs(draft.y1 - draft.y0)}
                 fill="rgba(255,138,31,0.2)"
-                stroke="#ff8a1f"
+                stroke="#ec4899"
                 strokeWidth={2 / viewport.scale}
                 dash={[6 / viewport.scale, 4 / viewport.scale]}
               />
@@ -632,7 +632,7 @@ export function MapCanvas() {
               <Group>
                 <Line
                   points={draft.cursor ? [...draft.points, draft.cursor.x, draft.cursor.y] : draft.points}
-                  stroke="#ff8a1f"
+                  stroke="#ec4899"
                   strokeWidth={2 / viewport.scale}
                   dash={[6 / viewport.scale, 4 / viewport.scale]}
                   closed={tool === 'polygon' && draft.points.length >= 6}
@@ -644,8 +644,8 @@ export function MapCanvas() {
                     x={draft.points[i * 2]}
                     y={draft.points[i * 2 + 1]}
                     radius={(i === 0 ? 6 : 4) / viewport.scale}
-                    fill={i === 0 ? '#ff8a1f' : '#0d0d11'}
-                    stroke="#ff8a1f"
+                    fill={i === 0 ? '#ec4899' : '#0d0f1a'}
+                    stroke="#ec4899"
                     strokeWidth={1.5 / viewport.scale}
                   />
                 ))}

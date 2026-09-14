@@ -97,7 +97,7 @@ export const useEditor = create<EditorState>((set, get) => {
     lastSavedAt: null,
     zoneType: 'gang',
     markerIcon: 'police',
-    paintColor: '#ff8a1f',
+    paintColor: '#ec4899',
     panels: { layers: true, properties: true, toolbar: true },
     thumbnailProvider: null,
 

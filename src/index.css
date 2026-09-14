@@ -1,30 +1,39 @@
 @import 'tailwindcss';
 
+/* LABSEVE7 brand system: deep navy-black glass UI, pink primary, cyan accent, Geist type. */
 @theme {
-  --color-ink-950: #07070a;
-  --color-ink-900: #0d0d11;
-  --color-ink-850: #121218;
-  --color-ink-800: #17171e;
-  --color-ink-750: #1d1d26;
-  --color-ink-700: #24242f;
-  --color-ink-600: #32323f;
-  --color-ink-500: #4a4a5a;
-  --color-ink-400: #6b6b7d;
-  --color-ink-300: #9a9aab;
-  --color-ink-200: #c9c9d4;
-  --color-ink-100: #ececf2;
+  --color-ink-950: #06070e;
+  --color-ink-900: #0a0c16;
+  --color-ink-850: #0d0f1a;
+  --color-ink-800: #12141f;
+  --color-ink-750: #171a27;
+  --color-ink-700: #1f2331;
+  --color-ink-600: #2b3042;
+  --color-ink-500: #414861;
+  --color-ink-400: #6b7390;
+  --color-ink-300: #9aa2bd;
+  --color-ink-200: #c9cfe3;
+  --color-ink-100: #f0f4ff;
 
-  --color-brand-300: #ffb86b;
-  --color-brand-400: #ff9d3d;
-  --color-brand-500: #ff8a1f;
-  --color-brand-600: #f0730a;
-  --color-brand-700: #c95c05;
+  --color-brand-300: #f9a8d4;
+  --color-brand-400: #f472b6;
+  --color-brand-500: #ec4899;
+  --color-brand-600: #db2777;
+  --color-brand-700: #be185d;
 
-  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --font-display: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --color-accent-300: #7fe9ff;
+  --color-accent-400: #33dfff;
+  --color-accent-500: #00d4ff;
+  --color-accent-600: #00a9cc;
 
-  --shadow-glow: 0 0 0 1px rgba(255, 138, 31, 0.35), 0 10px 40px -10px rgba(255, 138, 31, 0.45);
-  --shadow-panel: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 20px 50px -20px rgba(0, 0, 0, 0.8);
+  --color-violet-brand: #7b2ff7;
+
+  --font-sans: 'Geist', 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Geist', 'Inter', ui-sans-serif, system-ui, sans-serif;
+
+  --shadow-glow: 0 0 0 1px rgba(236, 72, 153, 0.35), 0 10px 40px -10px rgba(236, 72, 153, 0.55);
+  --shadow-glow-accent: 0 0 0 1px rgba(0, 212, 255, 0.35), 0 10px 40px -10px rgba(0, 212, 255, 0.5);
+  --shadow-panel: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 20px 50px -20px rgba(0, 0, 0, 0.8);
   --shadow-soft: 0 8px 30px -12px rgba(0, 0, 0, 0.7);
 
   --radius-xl2: 1.25rem;
@@ -42,12 +51,12 @@
   body {
     @apply bg-ink-950 text-ink-100 font-sans antialiased;
     background-image:
-      radial-gradient(1200px 600px at 10% -10%, rgba(255, 138, 31, 0.08), transparent 60%),
-      radial-gradient(900px 500px at 110% 10%, rgba(255, 138, 31, 0.05), transparent 60%);
+      radial-gradient(1200px 600px at 10% -10%, rgba(236, 72, 153, 0.07), transparent 60%),
+      radial-gradient(900px 500px at 110% 10%, rgba(123, 47, 247, 0.06), transparent 60%);
     overscroll-behavior: none;
   }
   ::selection {
-    background: rgba(255, 138, 31, 0.35);
+    background: rgba(236, 72, 153, 0.4);
   }
   input[type='range'] {
     accent-color: var(--color-brand-500);
@@ -65,8 +74,33 @@
 }
 
 @layer components {
+  /* Glass card, as on labseve7.com: translucent navy, 20px blur, hairline white border. */
   .panel {
-    @apply rounded-2xl border border-ink-700/80 bg-ink-850/90 shadow-panel backdrop-blur-md;
+    @apply rounded-2xl border border-white/10 bg-[#0f111e]/60 shadow-panel backdrop-blur-xl transition-[border-color,background-color,box-shadow] duration-300;
+  }
+  .panel-hover:hover {
+    @apply border-white/15 bg-[#141628]/70;
+    box-shadow: 0 8px 32px rgba(236, 72, 153, 0.1), inset 0 1px rgba(255, 255, 255, 0.05);
+  }
+  /* Solid variant for dense editor panels (no blur cost while dragging). */
+  .panel-solid {
+    @apply rounded-2xl border border-white/10 bg-ink-850 shadow-panel;
+  }
+  /* Gradient brand button (pink → violet → pink). */
+  .glass-btn {
+    background: linear-gradient(135deg, #ec4899 0%, #a855f7 55%, #ec4899 100%);
+    background-size: 200% 200%;
+    transition: background-position 0.4s ease, box-shadow 0.3s, transform 0.15s;
+  }
+  .glass-btn:hover {
+    background-position: 100% 50%;
+    box-shadow: 0 4px 30px rgba(236, 72, 153, 0.35), 0 4px 30px rgba(123, 47, 247, 0.2);
+  }
+  .text-gradient-brand {
+    @apply bg-gradient-to-r from-brand-300 via-brand-500 to-violet-brand bg-clip-text text-transparent;
+  }
+  .nav-link {
+    @apply text-[13px] font-medium tracking-wider text-ink-300 uppercase transition hover:text-ink-100;
   }
   .field {
     @apply w-full rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-ink-100 placeholder:text-ink-500 outline-none transition focus:border-brand-500/70 focus:ring-2 focus:ring-brand-500/20;
@@ -94,6 +128,91 @@
       linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
       linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
     background-size: 32px 32px;
+  }
+  /* Faded grid behind hero sections. */
+  .grid-fade {
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: linear-gradient(180deg, white, rgba(255, 255, 255, 0));
+  }
+}
+
+/* Floating blurred colour blobs fixed behind the page (labseve7 "glass" backdrop). */
+.glass-bg-blobs {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.glass-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(100px);
+  opacity: 0.45;
+  animation: blobFloat 22s ease-in-out infinite;
+  will-change: transform;
+}
+.glass-blob-1 {
+  top: -15%;
+  left: -10%;
+  width: 45vw;
+  height: 45vw;
+  max-width: 700px;
+  max-height: 700px;
+  background: radial-gradient(circle, #ec4899 0, transparent 70%);
+}
+.glass-blob-2 {
+  top: 30%;
+  right: -15%;
+  width: 40vw;
+  height: 40vw;
+  max-width: 600px;
+  max-height: 600px;
+  background: radial-gradient(circle, #7b2ff7 0, transparent 70%);
+  animation-duration: 26s;
+  animation-delay: -8s;
+}
+.glass-blob-3 {
+  bottom: -20%;
+  right: -5%;
+  width: 50vw;
+  height: 50vw;
+  max-width: 750px;
+  max-height: 750px;
+  background: radial-gradient(circle, #ec4899 0, transparent 70%);
+  animation-duration: 30s;
+  animation-delay: -14s;
+}
+.glass-blob-4 {
+  bottom: 10%;
+  left: -10%;
+  width: 30vw;
+  height: 30vw;
+  max-width: 400px;
+  max-height: 400px;
+  background: radial-gradient(circle, #00d4ff 0, transparent 70%);
+  animation-duration: 24s;
+  animation-delay: -4s;
+  opacity: 0.3;
+}
+@keyframes blobFloat {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  33% {
+    transform: translate(4%, -6%) scale(1.08);
+  }
+  66% {
+    transform: translate(-5%, 4%) scale(0.95);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .glass-blob {
+    animation: none;
   }
 }
 

@@ -1,7 +1,7 @@
 import type { BaseMapPreset, BaseMapStyle, FontFamily, MapPresetId, MarkerIcon, PlanId, TextElement, WorldBounds, ZoneType } from '@/types'
 import { DEFAULT_STYLE } from './mapStyle'
 
-export const APP_NAME = 'FiveM Map Studio'
+export const APP_NAME = 'LABSEVE7 Map Studio'
 
 export const DEFAULT_WORLD: WorldBounds = {
   minX: -4300,
@@ -43,7 +43,7 @@ export const ZONE_TYPES: Record<ZoneType, { label: string; color: string; descri
   gang: { label: 'Gang zone', color: '#e11d48', description: 'Territory controlled by a gang or faction.' },
   police: { label: 'Police zone', color: '#3b82f6', description: 'Law enforcement jurisdiction or restricted area.' },
   safe: { label: 'Safe zone', color: '#22c55e', description: 'No combat allowed. Players are protected.' },
-  custom: { label: 'Custom area', color: '#ff8a1f', description: 'Anything else: businesses, events, hotspots.' },
+  custom: { label: 'Custom area', color: '#ec4899', description: 'Anything else: businesses, events, hotspots.' },
 }
 
 export const MARKER_ICONS: Record<MarkerIcon, { label: string; color: string; blip: number }> = {
@@ -52,7 +52,7 @@ export const MARKER_ICONS: Record<MarkerIcon, { label: string; color: string; bl
   bank: { label: 'Bank', color: '#22c55e', blip: 108 },
   shop: { label: 'Shop', color: '#f59e0b', blip: 52 },
   garage: { label: 'Garage', color: '#a855f7', blip: 357 },
-  custom: { label: 'Custom', color: '#ff8a1f', blip: 1 },
+  custom: { label: 'Custom', color: '#ec4899', blip: 1 },
 }
 
 export const FONTS: FontFamily[] = [
@@ -288,6 +288,8 @@ export const STYLE_PRESETS: StylePreset[] = [
 ]
 
 export const PALETTE = [
+  '#ec4899',
+  '#00d4ff',
   '#ff8a1f',
   '#ffffff',
   '#0b0b0f',

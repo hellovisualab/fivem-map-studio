@@ -1,4 +1,4 @@
-# FiveM Map Studio
+# LABSEVE7 Map Studio
 
 A visual minimap editor for FiveM (GTA V) servers. Design custom minimaps in the browser — zones, labels, images and markers — then export a drop-in FiveM resource as a ZIP.
 
@@ -123,4 +123,4 @@ Browsers cannot write `.ytd` texture dictionaries, so the exporter ships ready-t
 
 - Base map presets are generated procedurally at runtime (stylized San Andreas silhouette) to avoid shipping copyrighted Rockstar textures. To use the **real GTA V maps**, drop your own textures (a single image or the `minimap_sea_*.dds` / `.png` tiles exported from OpenIV) into `public/maps/Color/`, `original/`, `satellite/`, `real-map/`, `real-map-down/` — the build decodes, stitches and optimizes them, and they replace the stylized presets automatically. See [`public/maps/README.md`](public/maps/README.md) for details, or upload a minimap per project via *Custom Upload*.
 - Payments are not wired up; the Supporter upgrade in the dashboard simulates a successful checkout so the plan logic can be tested.
-- FiveM Map Studio is a community tool and is not affiliated with Rockstar Games or Cfx.re.
+- LABSEVE7 Map Studio is a community tool and is not affiliated with Rockstar Games or Cfx.re.

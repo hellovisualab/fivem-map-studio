@@ -1,31 +1,32 @@
 import { Link } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 
+const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+export const LOGO_SRC = `${base}/brand/labseve7-logo.png`
+export const MARK_SRC = `${base}/brand/labseve7-mark.png`
+
+/** Square LABSEVE7 mark on a dark tile. */
 export function LogoMark({ className }: { className?: string }) {
   return (
-    <div
-      className={cn(
-        'flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-400 to-brand-700 text-ink-950 shadow-glow',
-        className,
-      )}
-    >
-      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round">
-        <path d="M3 6.5 9 4l6 2.5L21 4v13.5L15 20l-6-2.5L3 20z" />
-        <path d="M9 4v13.5M15 6.5V20" />
-      </svg>
+    <div className={cn('flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-ink-850 shadow-soft', className)}>
+      <img src={MARK_SRC} alt="LABSEVE7" className="h-[62%] w-[62%] object-contain" draggable={false} />
     </div>
   )
 }
 
-export function Logo({ to = '/', compact = false }: { to?: string; compact?: boolean }) {
+/** LABSEVE7 wordmark with a "Map Studio" product tag. */
+export function Logo({ to = '/', compact = false, className }: { to?: string; compact?: boolean; className?: string }) {
   return (
-    <Link to={to} className="group flex items-center gap-2.5">
-      <LogoMark />
-      {!compact && (
-        <span className="text-[15px] font-bold tracking-tight">
-          <span className="text-brand-400">FiveM</span>
-          <span className="text-ink-100"> Map Studio</span>
-        </span>
+    <Link to={to} className={cn('group flex items-center gap-2.5', className)}>
+      {compact ? (
+        <LogoMark />
+      ) : (
+        <>
+          <img src={LOGO_SRC} alt="LABSEVE7" className="h-7 w-auto select-none sm:h-8" draggable={false} />
+          <span className="hidden rounded-md border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.14em] text-ink-300 uppercase sm:inline-block">
+            Map Studio
+          </span>
+        </>
       )}
     </Link>
   )

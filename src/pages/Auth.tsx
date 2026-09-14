@@ -5,6 +5,7 @@ import { Lock, Mail, User } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Logo } from '@/components/ui/Logo'
 import { MapBackdrop } from '@/components/landing/MapBackdrop'
+import { GlassBlobs } from '@/components/layout/GlassBlobs'
 import { useAuth } from '@/store/useAuth'
 import { getData } from '@/lib/data'
 
@@ -39,17 +40,14 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' }) {
 
   return (
     <div className="relative flex min-h-full items-center justify-center overflow-hidden px-4 py-12">
+      <GlassBlobs />
       <MapBackdrop preset="satellite" />
-      <motion.div
-        initial={{ opacity: 0, y: 14 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="panel relative z-10 w-full max-w-md p-7"
-      >
+      <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="panel relative z-10 w-full max-w-md p-7">
         <div className="flex justify-center">
           <Logo />
         </div>
         <h1 className="mt-6 text-center text-2xl font-bold">{mode === 'login' ? 'Welcome back' : 'Create your account'}</h1>
-        <p className="mt-1 text-center text-sm text-ink-400">
+        <p className="text-ink-400 mt-1 text-center text-sm">
           {mode === 'login' ? 'Sign in to continue to your projects.' : 'Start designing your minimap in seconds.'}
         </p>
 
@@ -58,7 +56,7 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' }) {
             <label className="block">
               <span className="label">Display name</span>
               <div className="relative">
-                <User className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-ink-500" />
+                <User className="text-ink-500 pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
                 <input className="field pl-9" value={name} onChange={(e) => setName(e.target.value)} placeholder="Server owner" />
               </div>
             </label>
@@ -66,7 +64,7 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' }) {
           <label className="block">
             <span className="label">Email</span>
             <div className="relative">
-              <Mail className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-ink-500" />
+              <Mail className="text-ink-500 pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
               <input
                 className="field pl-9"
                 type="email"
@@ -81,7 +79,7 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' }) {
           <label className="block">
             <span className="label">Password</span>
             <div className="relative">
-              <Lock className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-ink-500" />
+              <Lock className="text-ink-500 pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
               <input
                 className="field pl-9"
                 type="password"
@@ -96,7 +94,11 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' }) {
           </label>
 
           {error && (
-            <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300"
+            >
               {error}
             </motion.p>
           )}
@@ -106,25 +108,25 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' }) {
           </Button>
         </form>
 
-        <p className="mt-6 text-center text-sm text-ink-400">
+        <p className="text-ink-400 mt-6 text-center text-sm">
           {mode === 'login' ? (
             <>
               No account?{' '}
-              <Link to="/register" state={{ from }} className="font-medium text-brand-400 hover:underline">
+              <Link to="/register" state={{ from }} className="text-brand-400 font-medium hover:underline">
                 Register
               </Link>
             </>
           ) : (
             <>
               Already have an account?{' '}
-              <Link to="/login" state={{ from }} className="font-medium text-brand-400 hover:underline">
+              <Link to="/login" state={{ from }} className="text-brand-400 font-medium hover:underline">
                 Sign in
               </Link>
             </>
           )}
         </p>
         {local && (
-          <p className="mt-4 rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2 text-center text-[11px] text-ink-500">
+          <p className="border-ink-700 bg-ink-900/60 text-ink-500 mt-4 rounded-lg border px-3 py-2 text-center text-[11px]">
             Running in local mode: accounts and projects are stored in this browser. Configure Supabase to sync across devices.
           </p>
         )}

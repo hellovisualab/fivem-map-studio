@@ -2,7 +2,7 @@ import { forwardRef, type ButtonHTMLAttributes } from 'react'
 import { Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-type Variant = 'primary' | 'secondary' | 'ghost' | 'outline' | 'danger'
+type Variant = 'primary' | 'accent' | 'secondary' | 'ghost' | 'outline' | 'danger'
 type Size = 'sm' | 'md' | 'lg' | 'icon'
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -13,10 +13,12 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variants: Record<Variant, string> = {
   primary:
-    'bg-gradient-to-b from-brand-400 to-brand-600 text-ink-950 font-semibold shadow-glow hover:from-brand-300 hover:to-brand-500 active:scale-[0.98]',
-  secondary: 'bg-ink-700 text-ink-100 hover:bg-ink-600 border border-ink-600/60',
-  ghost: 'text-ink-300 hover:text-ink-100 hover:bg-ink-700/60',
-  outline: 'border border-ink-600 text-ink-200 hover:border-brand-500/60 hover:text-brand-300 hover:bg-brand-500/5',
+    'bg-brand-500 text-white font-bold shadow-[0_0_12px_rgba(236,72,153,0.4)] hover:bg-brand-400 hover:-translate-y-px hover:shadow-[0_8px_24px_rgba(236,72,153,0.35)] active:translate-y-0 active:scale-[0.98]',
+  accent:
+    'bg-accent-500 text-ink-950 font-bold shadow-[0_0_12px_rgba(0,212,255,0.4)] hover:bg-accent-400 hover:-translate-y-px hover:shadow-[0_8px_24px_rgba(0,212,255,0.35)] active:translate-y-0 active:scale-[0.98]',
+  secondary: 'bg-white/[0.06] text-ink-100 border border-white/10 backdrop-blur-md hover:bg-white/[0.1] hover:border-white/20',
+  ghost: 'text-ink-300 hover:text-ink-100 hover:bg-white/[0.06]',
+  outline: 'border border-white/15 text-ink-100 backdrop-blur-md hover:border-brand-500/60 hover:bg-brand-500/10 hover:text-brand-300',
   danger: 'bg-red-500/10 text-red-300 border border-red-500/30 hover:bg-red-500/20',
 }
 

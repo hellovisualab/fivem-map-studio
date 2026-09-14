@@ -19,11 +19,11 @@ export const DEFAULT_STYLE: BaseMapStyle = {
   hue: 0,
   grayscale: 0,
   invert: false,
-  tint: '#ff8a1f',
+  tint: '#ec4899',
   tintOpacity: 0,
   tintBlend: 'normal',
   gradient: { enabled: false, from: '#ec4899', to: '#7c3aed', angle: 160, opacity: 0.7, blend: 'overlay' },
-  glow: { enabled: false, color: '#ff8a1f', size: 120, strength: 2, opacity: 0.9 },
+  glow: { enabled: false, color: '#ec4899', size: 120, strength: 2, opacity: 0.9 },
   keyColor: null,
   keyTolerance: 0.12,
 }
