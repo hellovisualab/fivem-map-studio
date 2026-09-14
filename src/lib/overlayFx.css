@@ -1,0 +1,228 @@
+/* NUI overlay animations. Also used as a CSS fallback; the exported script.js drives them with rAF. */
+
+.fms-fx {
+  --fms-fx-speed: 1;
+  --fms-fx-intensity: 0.7;
+  --fms-fx-color: #ec4899;
+}
+
+#overlay.fms-fx {
+  isolation: isolate;
+}
+
+.fms-fx-wrap {
+  display: block;
+  width: 100%;
+  border-radius: inherit;
+  transform-origin: 50% 50%;
+  will-change: transform, opacity, filter;
+}
+
+.fms-fx-wrap img,
+.fms-fx-wrap .fms-fx-wrap {
+  display: block;
+  width: 100%;
+}
+
+.fms-fx-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+  will-change: transform, opacity, background-position;
+}
+
+.fms-fx.js-driven .fms-fx-wrap,
+.fms-fx.js-driven .fms-fx-layer {
+  animation: none !important;
+}
+
+.fms-fx-pulse {
+  animation: fms-pulse 1.6s ease-in-out infinite;
+}
+@keyframes fms-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.fms-fx-glow {
+  animation: fms-glow 1.5s ease-in-out infinite;
+}
+@keyframes fms-glow {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 8px var(--fms-fx-color, #ec4899));
+  }
+  50% {
+    filter: drop-shadow(0 0 26px var(--fms-fx-color, #ec4899));
+  }
+}
+
+.fms-fx-breathe {
+  animation: fms-breathe 2.6s ease-in-out infinite;
+}
+@keyframes fms-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.07);
+  }
+}
+
+.fms-fx-scanlines {
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.07) 0 1px,
+    rgba(0, 0, 0, 0.5) 1px 4px
+  );
+  background-size: 100% 8px;
+  animation: fms-scan 0.85s linear infinite;
+  opacity: 0.8;
+}
+@keyframes fms-scan {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 0 8px;
+  }
+}
+
+.fms-fx-radar {
+  background: conic-gradient(from 0deg, transparent 0 62%, var(--fms-fx-color, #ec4899) 100%);
+  opacity: 0.55;
+  animation: fms-spin 2.6s linear infinite;
+}
+@keyframes fms-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.fms-fx-flicker {
+  animation: fms-flicker 1.8s steps(1, end) infinite;
+}
+@keyframes fms-flicker {
+  0%,
+  10%,
+  12%,
+  14%,
+  40%,
+  42%,
+  100% {
+    opacity: 1;
+  }
+  11%,
+  13%,
+  41% {
+    opacity: 0.25;
+  }
+}
+
+.fms-fx-heartbeat {
+  animation: fms-heartbeat 1.25s ease-in-out infinite;
+}
+@keyframes fms-heartbeat {
+  0%,
+  35%,
+  100% {
+    transform: scale(1);
+  }
+  12% {
+    transform: scale(1.08);
+  }
+  20% {
+    transform: scale(1);
+  }
+  28% {
+    transform: scale(1.05);
+  }
+}
+
+.fms-fx-shimmer {
+  background: linear-gradient(105deg, transparent 20%, var(--fms-fx-color, #ec4899) 50%, transparent 80%);
+  background-size: 220% 100%;
+  opacity: 0.55;
+  animation: fms-shimmer 2.1s linear infinite;
+}
+@keyframes fms-shimmer {
+  from {
+    background-position: 130% 0;
+  }
+  to {
+    background-position: -130% 0;
+  }
+}
+
+.fms-fx-ripple {
+  background:
+    radial-gradient(circle at 50% 50%, transparent 32%, var(--fms-fx-color, #ec4899) 36%, transparent 40%),
+    radial-gradient(circle at 50% 50%, transparent 52%, var(--fms-fx-color, #ec4899) 56%, transparent 60%);
+  animation: fms-ripple 2s ease-out infinite;
+}
+@keyframes fms-ripple {
+  from {
+    transform: scale(0.6);
+    opacity: 0.9;
+  }
+  to {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+
+.fms-fx-hue {
+  animation: fms-hue 4.5s linear infinite;
+}
+@keyframes fms-hue {
+  from {
+    filter: hue-rotate(0deg);
+  }
+  to {
+    filter: hue-rotate(360deg);
+  }
+}
+
+.fms-fx-glitch {
+  animation: fms-glitch 2.2s linear infinite;
+}
+@keyframes fms-glitch {
+  0%,
+  82%,
+  100% {
+    transform: translate(0);
+    filter: none;
+  }
+  84% {
+    transform: translate(-4px, 1px);
+    filter: hue-rotate(20deg);
+  }
+  87% {
+    transform: translate(4px, -2px);
+  }
+  90% {
+    transform: translate(-3px, 0);
+  }
+}
+
+.fms-fx-vignette {
+  box-shadow: inset 0 0 48px 18px #000;
+  animation: fms-vignette 2.2s ease-in-out infinite;
+}
+@keyframes fms-vignette {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}

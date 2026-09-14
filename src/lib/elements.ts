@@ -13,6 +13,7 @@ import type {
 } from '@/types'
 import { DEFAULT_WORLD, MARKER_ICONS, ZONE_TYPES } from './constants'
 import { PRESET_SEA, PRESET_SIZE } from './basemaps'
+import { DEFAULT_OVERLAY_FX } from './overlayFx'
 import { uid } from './utils'
 
 const base = (name: string, x: number, y: number) => ({
@@ -127,6 +128,7 @@ export function createDocument(preset: BaseMapPreset, source?: { src: string; wi
     grid: { enabled: false, size: 128 },
     // Procedural presets have a transparent sea; paint it via the background instead.
     background: procedural ? PRESET_SEA[preset as MapPresetId] : '#0a0a0c',
+    overlayFx: { ...DEFAULT_OVERLAY_FX },
   }
 }
 
