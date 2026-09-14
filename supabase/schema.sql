@@ -1,6 +1,7 @@
 -- FiveM Map Studio · Supabase schema
--- Run this in the SQL editor of your Supabase project, then create a public
--- storage bucket named "assets" (Storage → New bucket → Public).
+-- Run this once in the SQL editor of your Supabase project. It creates the
+-- tables, RLS policies, the signup trigger and the public "assets" bucket.
+-- Safe to re-run: tables use IF NOT EXISTS; drop policies first if re-creating.
 
 create extension if not exists "pgcrypto";
 
@@ -26,6 +27,30 @@ create policy "profiles: insert own" on public.profiles
   for insert with check (auth.uid() = id);
 create policy "profiles: update own" on public.profiles
   for update using (auth.uid() = id);
+
+-- Auto-create a profile row whenever a user signs up (the client also does
+-- this lazily on first login as a fallback).
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  insert into public.profiles (id, email, display_name)
+  values (
+    new.id,
+    coalesce(new.email, ''),
+    coalesce(new.raw_user_meta_data ->> 'display_name', split_part(coalesce(new.email, 'player'), '@', 1))
+  )
+  on conflict (id) do nothing;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
 
 -- ---------------------------------------------------------------------------
 -- Projects
@@ -68,8 +93,12 @@ create policy "history: owner full access" on public.history
   for all using (auth.uid() = owner_id) with check (auth.uid() = owner_id);
 
 -- ---------------------------------------------------------------------------
--- Storage policies for the "assets" bucket (files live under <user_id>/...)
+-- Storage: public "assets" bucket (files live under <user_id>/...)
 -- ---------------------------------------------------------------------------
+insert into storage.buckets (id, name, public)
+values ('assets', 'assets', true)
+on conflict (id) do update set public = true;
+
 create policy "assets: public read" on storage.objects
   for select using (bucket_id = 'assets');
 
