@@ -287,5 +287,33 @@ export async function loadDdsImage(url: string): Promise<HTMLImageElement | null
     })
   } catch {
     return null
+export const isDdsBuffer = (buf: ArrayBuffer) => buf.byteLength >= 4 && new DataView(buf).getUint32(0, true) === DDS_MAGIC
+
+/** Decodes a DDS buffer into an HTMLImageElement backed by an object URL of the decoded PNG. */
+export async function ddsBufferToImage(buf: ArrayBuffer): Promise<HTMLImageElement> {
+  const { canvas } = ddsToCanvas(buf)
+  const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/png'))
+  if (!blob) throw new Error('PNG encode failed')
+  const objectUrl = URL.createObjectURL(blob)
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = () => reject(new Error('Decoded image failed to load'))
+    img.src = objectUrl
+  })
+}
+
+/** Fetches and decodes a DDS URL. Returns the failure reason instead of throwing. */
+export async function loadDdsImage(url: string): Promise<{ img: HTMLImageElement | null; error?: string }> {
+  try {
+    const res = await fetch(url)
+    if (!res.ok) return { img: null, error: `HTTP ${res.status}` }
+    const type = res.headers.get('content-type') ?? ''
+    if (type.includes('text/html')) return { img: null, error: 'file not found (server returned the app page)' }
+    const buf = await res.arrayBuffer()
+    if (!isDdsBuffer(buf)) return { img: null, error: 'not a DDS file (missing "DDS " magic)' }
+    return { img: await ddsBufferToImage(buf) }
+  } catch (e) {
+    return { img: null, error: (e as Error).message }
   }
 }

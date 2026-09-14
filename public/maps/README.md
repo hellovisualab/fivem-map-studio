@@ -16,9 +16,11 @@ landing page:
 | `real-map/`      | Real Map        |
 | `real-map-down/` | Real Map Down   |
 
-Inside each folder put **either**:
+Inside each folder put **one of**:
 
 - a single composited image (any file name; `.png`, `.jpg`, `.webp` or `.dds`), **or**
+- a single composited image (any file name; `.png`, `.jpg`, `.webp` or `.dds`),
+- a **ZIP** containing the image or the tiles (unpacked in the browser), or
 - the tile set exported from the game, e.g. `minimap_sea_0_0.png` … `minimap_sea_2_3.png`
   (3 columns × 4 rows). Any `name_X_Y.ext` pattern is accepted; tiles are stitched in the
   browser. PNG and DDS (DXT1 / DXT3 / DXT5, the formats OpenIV exports) keep the transparent sea.
