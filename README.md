@@ -1,4 +1,4 @@
-# LABSEVE7 Map Studio
+# LABSEVE7 Tools
 
 A visual minimap editor for FiveM (GTA V) servers. Design custom minimaps in the browser — zones, labels, images and markers — then export a drop-in FiveM resource as a ZIP.
 

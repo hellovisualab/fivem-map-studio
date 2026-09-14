@@ -54,22 +54,9 @@ export function Dashboard() {
     const full = await data.getProject(p.id)
     if (!full) return
     const now = new Date().toISOString()
-    const copy = {
-      ...full,
-      id: uid(12),
-      name: `${full.name} copy`,
-      createdAt: now,
-      updatedAt: now,
-    }
+    const copy = { ...full, id: uid(12), name: `${full.name} copy`, createdAt: now, updatedAt: now }
     await data.createProject(copy)
-    await data.addHistory({
-      id: uid(),
-      projectId: copy.id,
-      projectName: copy.name,
-      action: 'duplicated',
-      at: now,
-      ownerId: user.id,
-    } as HistoryEntry)
+    await data.addHistory({ id: uid(), projectId: copy.id, projectName: copy.name, action: 'duplicated', at: now, ownerId: user.id } as HistoryEntry)
     toast.success('Project duplicated')
     setMenuFor(null)
     void load()
@@ -107,6 +94,9 @@ export function Dashboard() {
               <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{user.displayName}</h1>
             </div>
             <div className="flex gap-2">
+              <Button variant="ghost" onClick={() => navigate('/tools')}>
+                All tools
+              </Button>
               <Button variant="outline" onClick={() => navigate('/import')}>
                 <Upload className="h-4 w-4" /> Import minimap
               </Button>
@@ -172,8 +162,7 @@ export function Dashboard() {
                           <div className="px-4 py-3">
                             <h3 className="truncate font-semibold">{p.name}</h3>
                             <p className="text-ink-500 mt-0.5 text-xs">
-                              {p.elementCount} element
-                              {p.elementCount === 1 ? '' : 's'} · edited {formatRelative(p.updatedAt)}
+                              {p.elementCount} element{p.elementCount === 1 ? '' : 's'} · edited {formatRelative(p.updatedAt)}
                             </p>
                           </div>
                         </Link>
@@ -231,9 +220,7 @@ export function Dashboard() {
                     <div className="bg-ink-700 mt-1.5 h-1.5 overflow-hidden rounded-full">
                       <div
                         className="bg-brand-500 h-full rounded-full transition-all"
-                        style={{
-                          width: remaining === null ? '100%' : `${((plan.exportsPerDay! - remaining) / plan.exportsPerDay!) * 100}%`,
-                        }}
+                        style={{ width: remaining === null ? '100%' : `${((plan.exportsPerDay! - remaining) / plan.exportsPerDay!) * 100}%` }}
                       />
                     </div>
                   </div>
@@ -245,12 +232,7 @@ export function Dashboard() {
                       </span>
                     </div>
                     <div className="bg-ink-700 mt-1.5 h-1.5 overflow-hidden rounded-full">
-                      <div
-                        className="bg-ink-300 h-full rounded-full"
-                        style={{
-                          width: `${Math.min(100, (user.storageUsed / plan.storageBytes) * 100)}%`,
-                        }}
-                      />
+                      <div className="bg-ink-300 h-full rounded-full" style={{ width: `${Math.min(100, (user.storageUsed / plan.storageBytes) * 100)}%` }} />
                     </div>
                   </div>
                 </div>

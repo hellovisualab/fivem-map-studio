@@ -7,9 +7,13 @@ import { Landing } from '@/pages/Landing'
 import { AuthPage } from '@/pages/Auth'
 import { Dashboard } from '@/pages/Dashboard'
 import { NewProject } from '@/pages/NewProject'
+import { ToolsHub } from '@/pages/ToolsHub'
 import { LogoMark } from '@/components/ui/Logo'
 
 const EditorPage = lazy(() => import('@/pages/Editor').then((m) => ({ default: m.EditorPage })))
+const HandlingEditor = lazy(() => import('@/pages/tools/HandlingEditor').then((m) => ({ default: m.HandlingEditor })))
+const YtdOptimizer = lazy(() => import('@/pages/tools/YtdOptimizer').then((m) => ({ default: m.YtdOptimizer })))
+const PropCreator = lazy(() => import('@/pages/tools/PropCreator').then((m) => ({ default: m.PropCreator })))
 
 function FullscreenLoader() {
   return (
@@ -31,12 +35,18 @@ function RequireAuth() {
 
 function PageTransition() {
   const location = useLocation()
-  // Enter-only animation: exit transitions with <Outlet /> would re-render the
-  // incoming route inside the exiting wrapper and mount every page twice.
   return (
     <motion.div key={location.pathname} className="h-full" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
       <Outlet />
     </motion.div>
+  )
+}
+
+function ToolSuspense() {
+  return (
+    <Suspense fallback={<FullscreenLoader />}>
+      <Outlet />
+    </Suspense>
   )
 }
 
@@ -51,12 +61,18 @@ export default function App() {
       <Routes>
         <Route element={<PageTransition />}>
           <Route path="/" element={<Landing />} />
+          <Route path="/tools" element={<ToolsHub />} />
           <Route path="/login" element={<AuthPage mode="login" />} />
           <Route path="/register" element={<AuthPage mode="register" />} />
           <Route element={<RequireAuth />}>
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/new" element={<NewProject />} />
             <Route path="/import" element={<NewProject importMode />} />
+            <Route element={<ToolSuspense />}>
+              <Route path="/tools/handling" element={<HandlingEditor />} />
+              <Route path="/tools/ytd" element={<YtdOptimizer />} />
+              <Route path="/tools/props" element={<PropCreator />} />
+            </Route>
           </Route>
         </Route>
         <Route element={<RequireAuth />}>

@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, LogOut, Sparkles } from 'lucide-react'
+import { LayoutDashboard, LogOut, Sparkles, Wrench } from 'lucide-react'
 import { Logo } from '@/components/ui/Logo'
 import { Button } from '@/components/ui/Button'
 import { useAuth } from '@/store/useAuth'
@@ -13,7 +13,7 @@ export function Navbar() {
   return (
     <header className="sticky top-0 z-40 border-b border-white/[0.06] bg-ink-950/60 backdrop-blur-xl">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
-        <Logo />
+        <Logo to="/tools" />
         <nav className="flex items-center gap-2">
           {local && (
             <span className="hidden items-center gap-1 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-ink-400 sm:inline-flex">
@@ -25,8 +25,11 @@ export function Navbar() {
               <span className="hidden items-center gap-1.5 rounded-full border border-brand-500/30 bg-brand-500/10 px-2.5 py-1 text-[11px] font-semibold text-brand-300 sm:inline-flex">
                 <Sparkles className="h-3 w-3" /> {user.plan === 'supporter' ? 'Supporter' : 'Free'}
               </span>
+              <Button variant="ghost" size="sm" onClick={() => navigate('/tools')}>
+                <Wrench className="h-4 w-4" /> <span className="hidden sm:inline">Tools</span>
+              </Button>
               <Button variant="ghost" size="sm" onClick={() => navigate('/dashboard')}>
-                <LayoutDashboard className="h-4 w-4" /> <span className="hidden sm:inline">Dashboard</span>
+                <LayoutDashboard className="h-4 w-4" /> <span className="hidden sm:inline">Minimap</span>
               </Button>
               <Button
                 variant="outline"

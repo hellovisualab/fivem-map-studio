@@ -1,7 +1,7 @@
 import type { BaseMapPreset, BaseMapStyle, FontFamily, MapPresetId, MarkerIcon, PlanId, TextElement, WorldBounds, ZoneType } from '@/types'
 import { DEFAULT_STYLE } from './mapStyle'
 
-export const APP_NAME = 'LABSEVE7 Map Studio'
+export const APP_NAME = 'LABSEVE7 Tools'
 
 export const DEFAULT_WORLD: WorldBounds = {
   minX: -4300,
@@ -313,14 +313,14 @@ export const PLANS: Record<
     price: '$0',
     exportsPerDay: 1,
     storageBytes: 250 * 1024 * 1024,
-    features: ['1 export per day', 'All base map presets', 'Unlimited projects', 'Zones, labels, images & markers', '250 MB storage'],
+    features: ['1 export per day across all tools', 'Minimap, Handling, YTD & Props', 'Unlimited minimap projects', '250 MB storage'],
   },
   supporter: {
     name: 'Supporter',
     price: '$4.99 / mo',
     exportsPerDay: null,
     storageBytes: 5 * 1024 * 1024 * 1024,
-    features: ['Unlimited exports', 'Priority rendering', '4K tile export', 'Custom marker icons', '5 GB storage', 'Early access to new tools'],
+    features: ['Unlimited exports', 'All creation & optimization tools', '4K minimap export', '5 GB storage', 'Early access to new tools'],
   },
 }
 

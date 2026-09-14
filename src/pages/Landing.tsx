@@ -63,22 +63,22 @@ export function Landing() {
           <div className="relative mx-auto max-w-7xl px-4 pt-20 pb-24 sm:px-6 sm:pt-28 sm:pb-32">
             <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="mx-auto max-w-3xl text-center">
               <span className="border-brand-500/40 bg-brand-500/10 text-brand-300 inline-flex items-center gap-2 rounded-full border px-3.5 py-1 text-xs font-medium backdrop-blur-md">
-                <span className="bg-brand-400 h-1.5 w-1.5 animate-pulse rounded-full" /> LABSEVE7 · Minimap tools for FiveM
+                <span className="bg-brand-400 h-1.5 w-1.5 animate-pulse rounded-full" /> LABSEVE7 · Tools for FiveM servers
               </span>
               <h1 className="text-ink-100 mt-6 text-4xl leading-[1.05] font-extrabold tracking-tight uppercase sm:text-6xl lg:text-7xl">
-                FiveM Minimap
+                Premium tools
                 <br />
-                <span className="text-brand-500">Live Editor</span>
+                <span className="text-brand-500">for FiveM</span>
               </h1>
               <p className="text-ink-300 mx-auto mt-6 max-w-2xl text-base sm:text-lg">
-                Create custom GTA V minimaps directly in your browser. Add zones, labels, images and custom styles, then export your FiveM resource.
+                Create minimaps, props and handling files, and optimize textures — all in the browser. Export drop-in FiveM resources in one click.
               </p>
               <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-                <Button size="lg" onClick={() => go('/new')} className="w-full rounded-full px-7 sm:w-auto">
-                  Create project <ArrowRight className="h-4 w-4" />
+                <Button size="lg" onClick={() => go('/tools')} className="w-full rounded-full px-7 sm:w-auto">
+                  Open tools <ArrowRight className="h-4 w-4" />
                 </Button>
-                <Button size="lg" variant="outline" onClick={() => go('/import')} className="w-full rounded-full px-7 sm:w-auto">
-                  <Upload className="h-4 w-4" /> Import minimap
+                <Button size="lg" variant="outline" onClick={() => go('/new')} className="w-full rounded-full px-7 sm:w-auto">
+                  <Upload className="h-4 w-4" /> Minimap editor
                 </Button>
               </div>
               <div className="mt-10 flex items-center justify-center gap-2">
@@ -104,7 +104,7 @@ export function Landing() {
               className="panel mx-auto mt-12 grid max-w-2xl grid-cols-2 gap-y-5 px-6 py-5 text-center sm:grid-cols-4"
             >
               {[
-                ['5', 'Base maps'],
+                ['4', 'Tools'],
                 ['FiveM', 'Ready export'],
                 ['4K', 'Textures'],
                 ['0', 'Lines of Lua'],
@@ -274,7 +274,7 @@ export function Landing() {
           <div className="mx-auto flex max-w-7xl flex-col items-center gap-4 px-4 text-center sm:flex-row sm:justify-between sm:text-left">
             <div className="flex items-center gap-3">
               <img src={LOGO_SRC} alt="LABSEVE7" className="h-6 w-auto" />
-              <span className="text-ink-500 text-xs">Map Studio</span>
+              <span className="text-ink-500 text-xs">Tools</span>
             </div>
             <p className="text-ink-500 text-xs">
               Not affiliated with Rockstar Games or Cfx.re.{' '}
