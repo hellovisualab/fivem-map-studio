@@ -1,4 +1,5 @@
 import JSZip from 'jszip'
+import { ddsToPngBlob, isDds } from './dds'
 import { loadImage, readFileAsDataURL } from './utils'
 
 export interface ImportResult {
@@ -9,13 +10,21 @@ export interface ImportResult {
   warnings: string[]
 }
 
-const IMAGE_RE = /\.(png|jpe?g|webp)$/i
-const TILE_RE = /(\d+)[_-](\d+)\.(png|jpe?g|webp)$/i
+const IMAGE_RE = /\.(png|jpe?g|webp|dds)$/i
+const TILE_RE = /(\d+)[_-](\d+)\.(png|jpe?g|webp|dds)$/i
 const MAX_SIDE = 4096
 
 interface NamedBlob {
   name: string
   blob: Blob
+}
+
+async function pushDds(images: NamedBlob[], warnings: string[], name: string, blob: Blob) {
+  try {
+    images.push({ name: name.replace(/\.dds$/i, '.png'), blob: await ddsToPngBlob(blob) })
+  } catch (e) {
+    warnings.push(`${name}: ${(e as Error).message}`)
+  }
 }
 
 async function collect(files: File[]): Promise<{ images: NamedBlob[]; warnings: string[] }> {
@@ -27,7 +36,9 @@ async function collect(files: File[]): Promise<{ images: NamedBlob[]; warnings: 
       for (const entry of Object.values(zip.files)) {
         if (entry.dir) continue
         const base = entry.name.split('/').pop() ?? entry.name
-        if (IMAGE_RE.test(base)) {
+        if (isDds(base)) {
+          await pushDds(images, warnings, base, await entry.async('blob'))
+        } else if (IMAGE_RE.test(base)) {
           const blob = await entry.async('blob')
           const type = base.toLowerCase().endsWith('.png') ? 'image/png' : base.toLowerCase().endsWith('.webp') ? 'image/webp' : 'image/jpeg'
           images.push({ name: base, blob: new Blob([blob], { type }) })
@@ -35,6 +46,8 @@ async function collect(files: File[]): Promise<{ images: NamedBlob[]; warnings: 
           warnings.push(`${base}: .ytd textures cannot be decoded in the browser. Export them to PNG with OpenIV or Codewalker first.`)
         }
       }
+    } else if (isDds(f.name)) {
+      await pushDds(images, warnings, f.name, f)
     } else if (IMAGE_RE.test(f.name)) {
       images.push({ name: f.name, blob: f })
     } else if (/\.ytd$/i.test(f.name)) {
@@ -108,7 +121,7 @@ export function assembleImages(items: { name: string; img: HTMLImageElement }[])
 export async function importMinimapFiles(files: File[]): Promise<ImportResult> {
   const { images, warnings } = await collect(files)
   if (!images.length) {
-    throw new Error(warnings[0] ?? 'No supported image files were found. Use PNG, JPG, WebP or a ZIP containing them.')
+    throw new Error(warnings[0] ?? 'No supported image files were found. Use PNG, JPG, WebP, DDS or a ZIP containing them.')
   }
 
   const loaded = await Promise.all(images.map(async (im) => ({ name: im.name, img: await loadImage(await readFileAsDataURL(im.blob)) })))

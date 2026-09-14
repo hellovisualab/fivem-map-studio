@@ -63,7 +63,7 @@ export function NewProject({ importMode = false }: { importMode?: boolean }) {
   const create = async () => {
     if (!user) return
     if (preset === 'custom' && !custom) {
-      toast.error('Upload a minimap first', 'Drop PNG / JPG / WebP frames, tiles or a ZIP.')
+      toast.error('Upload a minimap first', 'Drop PNG / JPG / WebP / DDS frames, tiles or a ZIP.')
       return
     }
     setCreating(true)
@@ -219,7 +219,7 @@ export function NewProject({ importMode = false }: { importMode?: boolean }) {
                   ref={fileRef}
                   type="file"
                   multiple
-                  accept=".png,.jpg,.jpeg,.webp,.zip,.ytd"
+                  accept=".png,.jpg,.jpeg,.webp,.dds,.zip,.ytd"
                   className="hidden"
                   onChange={(e) => e.target.files && void handleFiles(e.target.files)}
                 />
@@ -231,7 +231,7 @@ export function NewProject({ importMode = false }: { importMode?: boolean }) {
                   </div>
                 )}
                 <p className="mt-3 font-semibold">Drop your minimap files here</p>
-                <p className="mt-1 text-xs text-ink-400">PNG · JPG · WebP frames · split tiles · ZIP folders · or click to browse</p>
+                <p className="mt-1 text-xs text-ink-400">PNG · JPG · WebP · DDS frames · split tiles · ZIP folders · or click to browse</p>
                 <p className="mt-3 text-[11px] text-ink-500">
                   Name your tiles <code className="rounded bg-ink-800 px-1 py-0.5 text-ink-300">minimap_sea_0_0</code> …{' '}
                   <code className="rounded bg-ink-800 px-1 py-0.5 text-ink-300">minimap_sea_2_1</code> and they will land on the right spot.

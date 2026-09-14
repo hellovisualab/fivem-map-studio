@@ -21,7 +21,7 @@ export const PRESETS: {
   { id: 'satellite', name: 'Satellite', tag: '4K native', description: 'Aerial imagery style with terrain shading.' },
   { id: 'realmap', name: 'Real Map', tag: '4K native', description: 'Paper-like cartography with soft tones.' },
   { id: 'realmapdown', name: 'Real Map Down', tag: '4K native', description: 'Alternative real-map variant.' },
-  { id: 'custom', name: 'Custom Upload', tag: 'Your files', description: 'Import PNG / JPG / WebP frames or split tiles.' },
+  { id: 'custom', name: 'Custom Upload', tag: 'Your files', description: 'Import PNG / JPG / WebP / DDS frames or split tiles.' },
 ]
 
 export const MAP_PRESET_IDS: MapPresetId[] = ['color', 'original', 'satellite', 'realmap', 'realmapdown']

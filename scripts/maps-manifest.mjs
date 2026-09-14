@@ -16,8 +16,8 @@ const FOLDERS = {
   realmap: 'real-map',
   realmapdown: 'real-map-down',
 }
-const IMAGE_RE = /\.(png|jpe?g|webp)$/i
-const TILE_RE = /(\d+)[_-](\d+)\.(png|jpe?g|webp)$/i
+const IMAGE_RE = /\.(png|jpe?g|webp|dds)$/i
+const TILE_RE = /(\d+)[_-](\d+)\.(png|jpe?g|webp|dds)$/i
 
 function listImages(dir) {
   if (!existsSync(dir)) return []

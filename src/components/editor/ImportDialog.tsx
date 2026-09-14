@@ -69,11 +69,11 @@ export function ImportDialog({ open, onClose }: { open: boolean; onClose: () => 
           drag ? 'border-brand-500 bg-brand-500/10' : 'border-ink-700 bg-ink-900/40 hover:border-ink-500',
         )}
       >
-        <input ref={fileRef} type="file" multiple accept=".png,.jpg,.jpeg,.webp,.zip,.ytd" className="hidden" onChange={(e) => e.target.files && void handle(e.target.files)} />
+        <input ref={fileRef} type="file" multiple accept=".png,.jpg,.jpeg,.webp,.dds,.zip,.ytd" className="hidden" onChange={(e) => e.target.files && void handle(e.target.files)} />
         {busy ? <Loader2 className="h-7 w-7 animate-spin text-brand-400" /> : <Upload className="h-7 w-7 text-ink-400" />}
         <p className="mt-3 text-sm font-semibold">Drop your minimap files here</p>
         <p className="mt-1 text-xs text-ink-400">
-          {mode === 'base' ? '.png / .jpg / .webp frames · split tiles · .zip folders' : 'PNG, JPG or WebP images'}
+          {mode === 'base' ? '.png / .jpg / .webp / .dds frames · split tiles · .zip folders' : 'PNG, JPG or WebP images'}
         </p>
         {mode === 'base' && (
           <p className="mt-3 text-[11px] text-ink-500">

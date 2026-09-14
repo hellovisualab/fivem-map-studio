@@ -1,5 +1,6 @@
 import type { BaseMapPreset, MapPresetId } from '@/types'
 import { MAP_FOLDERS } from './constants'
+import { isDds, loadDdsImage } from './dds'
 import { assembleImages } from './importer'
 
 export const PRESET_SIZE = { width: 1536, height: 2048 }
@@ -492,7 +493,7 @@ export interface PresetSource {
   tiles: number
 }
 
-const REAL_MAP_EXTENSIONS = ['jpg', 'png', 'webp', 'jpeg']
+const REAL_MAP_EXTENSIONS = ['jpg', 'png', 'webp', 'jpeg', 'dds']
 const sourceCache = new Map<string, Promise<PresetSource>>()
 const resolved = new Map<string, PresetSource>()
 
@@ -522,6 +523,7 @@ function loadManifest(): Promise<MapsManifest | null> {
 }
 
 function probeImage(url: string): Promise<HTMLImageElement | null> {
+  if (isDds(url)) return loadDdsImage(url)
   return new Promise((resolve) => {
     const img = new Image()
     img.onload = () => resolve(img.naturalWidth > 0 ? img : null)
@@ -542,7 +544,7 @@ async function probeFolder(preset: MapPresetId): Promise<{ name: string; img: HT
   }
   // Standard GTA V minimap grid: 3 columns × 4 rows.
   for (const prefix of ['minimap_sea_', 'minimap_', 'tile_']) {
-    for (const ext of ['png', 'jpg', 'webp']) {
+    for (const ext of ['png', 'dds', 'jpg', 'webp']) {
       const first = await probeImage(`${folder}/${prefix}0_0.${ext}`)
       if (!first) continue
       const tiles: { name: string; img: HTMLImageElement }[] = [{ name: `${prefix}0_0.${ext}`, img: first }]
