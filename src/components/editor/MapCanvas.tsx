@@ -8,9 +8,9 @@ import { useAuth } from '@/store/useAuth'
 import { canvasApi } from '@/lib/canvasApi'
 import { MAX_ZOOM, MIN_ZOOM } from '@/lib/constants'
 import { createImage, createLine, createMarker, createRectZone, createText, createZone } from '@/lib/elements'
-import { resolveBaseSrc } from '@/lib/render'
 import { isClipped } from '@/lib/mapStyle'
 import { useStyledBase } from '@/hooks/useStyledBase'
+import { useBaseSrc } from '@/hooks/useBaseSrc'
 import { getData } from '@/lib/data'
 import { clamp, loadImage, readFileAsDataURL } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
@@ -78,7 +78,7 @@ export function MapCanvas() {
   } = useEditor.getState()
   const user = useAuth((s) => s.user)
 
-  const baseSrc = doc ? resolveBaseSrc(doc) : ''
+  const baseSrc = useBaseSrc(doc)
   const [baseImg] = useImage(baseSrc, 'anonymous')
   const styled = useStyledBase(baseImg, doc?.baseMap ?? EMPTY_BASE)
   const clippedElements = useMemo(() => doc?.elements.filter(isClipped) ?? [], [doc?.elements])

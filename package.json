@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "predev": "node scripts/maps-manifest.mjs",
     "build": "tsc -b && vite build",
+    "prebuild": "node scripts/maps-manifest.mjs",
+    "maps": "node scripts/maps-manifest.mjs",
     "lint": "oxlint",
     "preview": "vite preview"
   },

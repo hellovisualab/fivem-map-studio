@@ -1,13 +1,26 @@
 import type { MapDocument, MapElement, TextElement } from '@/types'
-import { getPresetMap } from './basemaps'
+import { getPresetMap, getResolvedPreset, resolvePresetSource } from './basemaps'
 import { MARKER_PATHS } from './icons'
 import { loadDocumentFonts } from './fonts'
 import { composeBaseMap, drawStyledBase, effectsOf, isClipped, styleOf, toComposite } from './mapStyle'
 import { loadImage, rgba } from './utils'
 
+/**
+ * Base texture URL for a document. Presets resolve to the real texture under
+ * /maps/ once `ensureBaseSrc` has run, otherwise to the procedural map.
+ */
 export function resolveBaseSrc(doc: MapDocument): string {
-  if (doc.baseMap.preset !== 'custom' && !doc.baseMap.src) return getPresetMap(doc.baseMap.preset)
+  if (doc.baseMap.preset !== 'custom' && !doc.baseMap.src) {
+    const real = getResolvedPreset(doc.baseMap.preset)
+    return real?.real ? real.src : getPresetMap(doc.baseMap.preset)
+  }
   return doc.baseMap.src
+}
+
+/** Waits for the preset lookup (manifest / folder probe) so `resolveBaseSrc` returns the final URL. */
+export async function ensureBaseSrc(doc: MapDocument): Promise<string> {
+  if (doc.baseMap.preset !== 'custom' && !doc.baseMap.src) await resolvePresetSource(doc.baseMap.preset)
+  return resolveBaseSrc(doc)
 }
 
 const imageCache = new Map<string, Promise<HTMLImageElement>>()
@@ -224,7 +237,7 @@ export async function renderDocument(doc: MapDocument, opts: RenderOptions = {})
 
   if (!opts.overlayOnly) {
     let base: HTMLImageElement | null = null
-    const baseSrc = resolveBaseSrc(doc)
+    const baseSrc = await ensureBaseSrc(doc)
     if (baseSrc) {
       try {
         base = await cachedImage(baseSrc)

@@ -8,7 +8,7 @@ import { canvasToWorld, worldToCanvas } from '@/lib/geometry'
 import { getData } from '@/lib/data'
 import { importMinimapFiles } from '@/lib/importer'
 import { BLEND_MODES, effectsOf, sampleCornerColor, styleOf } from '@/lib/mapStyle'
-import { resolveBaseSrc } from '@/lib/render'
+import { ensureBaseSrc } from '@/lib/render'
 import { loadFont } from '@/lib/fonts'
 import { cn, loadImage, round } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
@@ -144,7 +144,7 @@ function MapStyleSections() {
   const pickSea = async () => {
     setSampling(true)
     try {
-      const img = await loadImage(resolveBaseSrc(doc))
+      const img = await loadImage(await ensureBaseSrc(doc))
       const c = sampleCornerColor(img, doc.baseMap.width, doc.baseMap.height)
       if (c === 'transparent') {
         toast.info('Sea is already transparent', 'This texture has an alpha channel; no color key needed.')

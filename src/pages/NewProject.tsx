@@ -5,7 +5,7 @@ import { ArrowLeft, Check, FileImage, Loader2, Upload, X } from 'lucide-react'
 import { Navbar } from '@/components/layout/Navbar'
 import { Button } from '@/components/ui/Button'
 import { toast } from '@/components/ui/Toast'
-import { PRESETS } from '@/lib/constants'
+import { MAP_FOLDERS, MAP_PRESET_IDS, PRESETS } from '@/lib/constants'
 import { resolvePresetSource, type PresetSource } from '@/lib/basemaps'
 import { createDocument } from '@/lib/elements'
 import { importMinimapFiles, type ImportResult } from '@/lib/importer'
@@ -28,9 +28,8 @@ export function NewProject({ importMode = false }: { importMode?: boolean }) {
 
   useEffect(() => {
     let alive = true
-    const ids: Exclude<BaseMapPreset, 'custom'>[] = ['color', 'original', 'satellite', 'realmap']
     ;(async () => {
-      for (const id of ids) {
+      for (const id of MAP_PRESET_IDS) {
         const source = await resolvePresetSource(id)
         if (!alive) return
         setSources((p) => ({ ...p, [id]: source }))
@@ -76,7 +75,15 @@ export function NewProject({ importMode = false }: { importMode?: boolean }) {
         name: name.trim() || (preset === 'custom' ? 'Imported minimap' : 'Untitled minimap'),
         createdAt: now,
         updatedAt: now,
-        document: createDocument(preset, preset === 'custom' ? custom ?? undefined : selectedSource?.real ? selectedSource : undefined),
+        document: createDocument(
+          preset,
+          preset === 'custom'
+            ? custom ?? undefined
+            : selectedSource?.real
+              ? // Presets keep src empty and are resolved from /maps/ on every load.
+                { src: '', width: selectedSource.width, height: selectedSource.height, real: true }
+              : undefined,
+        ),
       }
       const data = getData()
       await data.createProject(project)
@@ -117,9 +124,14 @@ export function NewProject({ importMode = false }: { importMode?: boolean }) {
               <span className="label">Start from a preset</span>
               {Object.values(sources).length > 0 && !Object.values(sources).some((s) => s?.real) && (
                 <p className="mb-3 rounded-xl border border-ink-700 bg-ink-850/70 px-3 py-2 text-xs text-ink-400">
-                  Presets are stylized previews. Drop your own GTA V minimap textures in <code className="rounded bg-ink-800 px-1 text-ink-300">public/maps/</code>{' '}
-                  (<code className="rounded bg-ink-800 px-1 text-ink-300">color.jpg</code>, <code className="rounded bg-ink-800 px-1 text-ink-300">original.jpg</code>…) to use the real
-                  maps, or import them below.
+                  Presets are stylized previews. Drop your own GTA V minimap textures (one image or <code className="rounded bg-ink-800 px-1 text-ink-300">*_X_Y.png</code> tiles) into{' '}
+                  {MAP_PRESET_IDS.map((id, i) => (
+                    <span key={id}>
+                      <code className="rounded bg-ink-800 px-1 text-ink-300">public/maps/{MAP_FOLDERS[id]}/</code>
+                      {i < MAP_PRESET_IDS.length - 1 ? ', ' : ''}
+                    </span>
+                  ))}{' '}
+                  to use the real maps, or import them below.
                 </p>
               )}
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -127,7 +139,14 @@ export function NewProject({ importMode = false }: { importMode?: boolean }) {
                   const active = preset === p.id
                   const source = p.id === 'custom' ? undefined : sources[p.id]
                   const src = p.id === 'custom' ? custom?.src : source?.preview
-                  const tag = p.id === 'custom' ? p.tag : source ? (source.real ? `${source.width}×${source.height}` : 'Stylized preview') : '…'
+                  const tag =
+                    p.id === 'custom'
+                      ? p.tag
+                      : source
+                        ? source.real
+                          ? `${source.width}×${source.height}${source.tiles > 1 ? ` · ${source.tiles} tiles` : ''}`
+                          : 'Stylized preview'
+                        : '…'
                   return (
                     <motion.button
                       key={p.id}

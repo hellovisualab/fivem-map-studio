@@ -4,6 +4,7 @@ import type {
   LineElement,
   MapDocument,
   MapElement,
+  MapPresetId,
   MarkerElement,
   MarkerIcon,
   TextElement,
@@ -104,10 +105,12 @@ export function createMarker(x: number, y: number, icon: MarkerIcon = 'custom'):
 }
 
 /**
- * @param source For `custom` the uploaded image; for presets, an optional real
- *   texture resolved from /maps/ (empty src = procedural fallback).
+ * @param source For `custom` the uploaded image; for presets, the dimensions of
+ *   the real texture found under /maps/ (`real: true`, src stays empty and is
+ *   resolved again on load). Omit for the procedural fallback.
  */
-export function createDocument(preset: BaseMapPreset, source?: { src: string; width: number; height: number }): MapDocument {
+export function createDocument(preset: BaseMapPreset, source?: { src: string; width: number; height: number; real?: boolean }): MapDocument {
+  const procedural = preset !== 'custom' && !source?.src && !source?.real
   return {
     version: 1,
     baseMap: {
@@ -123,20 +126,8 @@ export function createDocument(preset: BaseMapPreset, source?: { src: string; wi
     world: { ...DEFAULT_WORLD },
     grid: { enabled: false, size: 128 },
     // Procedural presets have a transparent sea; paint it via the background instead.
-    background: preset !== 'custom' && !source?.src ? PRESET_SEA[preset] : '#0a0a0c',
+    background: procedural ? PRESET_SEA[preset as MapPresetId] : '#0a0a0c',
   }
-}
-
-/**
- * Upgrades documents saved before procedural presets switched to a transparent
- * sea: the old default background would otherwise render the sea near-black.
- */
-export function migrateDocument(doc: MapDocument): MapDocument {
-  const { preset, src } = doc.baseMap
-  if (preset !== 'custom' && !src && doc.background === '#0a0a0c') {
-    return { ...doc, background: PRESET_SEA[preset] }
-  }
-  return doc
 }
 
 export function cloneElement(el: MapElement, dx = 24, dy = 24): MapElement {

@@ -4,31 +4,44 @@ FiveM Map Studio ships with **stylized, procedurally generated** presets because
 original GTA V minimap textures are copyrighted by Rockstar Games and cannot be
 redistributed with this project.
 
-To use the real maps, drop your own textures in this folder. They are picked up
-automatically (no code changes) by the project creator, the editor and the landing page:
+To use the real maps, drop your own textures into these folders. They are picked up
+automatically (no code changes) by the project creator, the editor, exports and the
+landing page:
 
-| File                     | Preset             |
-| ------------------------ | ------------------ |
-| `color.jpg`              | GTA V Color Map    |
-| `original.jpg`           | Original Map       |
-| `satellite.jpg`          | Satellite          |
-| `realmap.jpg`            | Real Map           |
+| Folder           | Preset          |
+| ---------------- | --------------- |
+| `Color/`         | GTA V Color Map |
+| `original/`      | Original Map    |
+| `satellite/`     | Satellite       |
+| `real-map/`      | Real Map        |
+| `real-map-down/` | Real Map Down   |
 
-`.png` and `.webp` are accepted too (`color.png`, `color.webp`, …). A single
-composited image per preset is expected (portrait, roughly 3:4, e.g. 3072×4096 or
-6144×8192). Larger images are fine; the editor scales them for display.
+Inside each folder put **either**:
+
+- a single composited image (any file name; `.png`, `.jpg` or `.webp`), **or**
+- the tile set exported from the game, e.g. `minimap_sea_0_0.png` … `minimap_sea_2_3.png`
+  (3 columns × 4 rows). Any `name_X_Y.ext` pattern is accepted; tiles are stitched in the
+  browser. Keep PNG for tiles so the transparent sea is preserved.
+
+Uploading through the GitHub web UI works: open the folder → **Add file → Upload files**.
+If you have a ZIP, extract it first and upload its images (GitHub does not unpack ZIPs).
+
+## How it is wired
+
+`npm run build` (and `npm run dev`) first runs `scripts/maps-manifest.mjs`, which indexes
+the images here into `public/maps/manifest.json`. The app reads that manifest, so no
+directory listing is required on static hosts. Without a manifest the app falls back to
+probing `full.*` / `minimap.*` / `minimap_sea_X_Y.*` inside each folder.
+
+The legacy single-file convention `public/maps/<preset>.jpg` (`color.jpg`, `original.jpg`,
+`satellite.jpg`, `realmap.jpg`, `realmapdown.jpg`) still works.
 
 ## Getting a composited image from the game files
 
-1. Open `x64a.rpf` (or the update RPFs) in **OpenIV** and locate
-   `minimap.ytd` / `minimap_sea_*.ytd` textures.
-2. Export the tiles as PNG (`minimap_sea_0_0.png` … `minimap_sea_2_3.png`).
-3. Either stitch them yourself, or open FiveM Map Studio → **Import minimap** and drop
-   all tiles: the app stitches them into one image. Right-click the preview to save it,
-   or export the project and take `stream/minimap_full.png` from the ZIP.
-4. Save the result here with the preset name, redeploy, and the preset shows the real map.
+1. Open `x64a.rpf` (or the update RPFs) in **OpenIV** and locate `minimap.ytd` /
+   `minimap_sea_*.ytd`.
+2. Export the tiles as PNG and copy them into the matching folder above.
+3. Push / redeploy. The preset card shows the real texture with its size and tile count.
 
-Community-made variants (satellite, colored, "Cayo Perico" etc.) work the same way as
+Community-made variants (satellite, colored, "down" versions, etc.) work the same way as
 long as you have the rights to use them on your server.
-
-After adding textures, redeploy (Vercel/Netlify rebuild) so the files are published.

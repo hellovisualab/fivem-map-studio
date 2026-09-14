@@ -1,4 +1,4 @@
-import type { BaseMapPreset, BaseMapStyle, FontFamily, MarkerIcon, PlanId, TextElement, WorldBounds, ZoneType } from '@/types'
+import type { BaseMapPreset, BaseMapStyle, FontFamily, MapPresetId, MarkerIcon, PlanId, TextElement, WorldBounds, ZoneType } from '@/types'
 import { DEFAULT_STYLE } from './mapStyle'
 
 export const APP_NAME = 'FiveM Map Studio'
@@ -20,8 +20,24 @@ export const PRESETS: {
   { id: 'original', name: 'Original Map', tag: '1K native', description: 'Classic dark radar look with crisp white roads.' },
   { id: 'satellite', name: 'Satellite', tag: '4K native', description: 'Aerial imagery style with terrain shading.' },
   { id: 'realmap', name: 'Real Map', tag: '4K native', description: 'Paper-like cartography with soft tones.' },
+  { id: 'realmapdown', name: 'Real Map Down', tag: '4K native', description: 'Alternative real-map variant.' },
   { id: 'custom', name: 'Custom Upload', tag: 'Your files', description: 'Import PNG / JPG / WebP frames or split tiles.' },
 ]
+
+export const MAP_PRESET_IDS: MapPresetId[] = ['color', 'original', 'satellite', 'realmap', 'realmapdown']
+
+/**
+ * Folder under `public/maps/` that holds the real texture for each preset.
+ * Drop a single image (any name) or `*_X_Y.png` tiles inside; the build
+ * script indexes them into `public/maps/manifest.json`.
+ */
+export const MAP_FOLDERS: Record<MapPresetId, string> = {
+  color: 'Color',
+  original: 'original',
+  satellite: 'satellite',
+  realmap: 'real-map',
+  realmapdown: 'real-map-down',
+}
 
 export const ZONE_TYPES: Record<ZoneType, { label: string; color: string; description: string }> = {
   gang: { label: 'Gang zone', color: '#e11d48', description: 'Territory controlled by a gang or faction.' },

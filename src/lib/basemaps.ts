@@ -1,4 +1,6 @@
-import type { BaseMapPreset } from '@/types'
+import type { BaseMapPreset, MapPresetId } from '@/types'
+import { MAP_FOLDERS } from './constants'
+import { assembleImages } from './importer'
 
 export const PRESET_SIZE = { width: 1536, height: 2048 }
 
@@ -88,6 +90,23 @@ const STYLES: Record<Exclude<BaseMapPreset, 'custom'>, Style> = {
     roadCasing: '#c9c4b8',
     cityBlock: '#e6e1d6',
     sand: '#f1e7c8',
+    texture: 'paper',
+    format: 'image/jpeg',
+  },
+  realmapdown: {
+    sea: '#2a3441',
+    seaDeep: '#1d2531',
+    coastGlow: 'rgba(120,140,170,0.3)',
+    land: '#3d4652',
+    landAlt: '#46505e',
+    mountain: '#525a66',
+    lake: '#2a3441',
+    highway: '#e3b56f',
+    highwayCasing: '#b58a45',
+    road: '#cfd4dc',
+    roadCasing: '#8d939d',
+    cityBlock: '#4c5563',
+    sand: '#5b6270',
     texture: 'paper',
     format: 'image/jpeg',
   },
@@ -422,6 +441,7 @@ export const PRESET_SEA: Record<Exclude<BaseMapPreset, 'custom'>, string> = {
   original: STYLES.original.sea,
   satellite: STYLES.satellite.sea,
   realmap: STYLES.realmap.sea,
+  realmapdown: STYLES.realmapdown.sea,
 }
 
 const cache = new Map<string, string>()
@@ -456,7 +476,11 @@ export function getPresetMapAsync(preset: Exclude<BaseMapPreset, 'custom'>): Pro
 }
 
 export interface PresetSource {
-  /** URL to use as the document base map. Empty string = procedural fallback. */
+  /**
+   * Session URL of the resolved texture (static file or object URL of stitched
+   * tiles). Empty string = procedural fallback. Never persisted: documents store
+   * only the preset id and resolve it again on load.
+   */
   src: string
   width: number
   height: number
@@ -464,42 +488,115 @@ export interface PresetSource {
   real: boolean
   /** Displayable URL (real texture or procedural data URL). */
   preview: string
+  /** Number of tiles stitched (1 for a single image). */
+  tiles: number
 }
 
 const REAL_MAP_EXTENSIONS = ['jpg', 'png', 'webp', 'jpeg']
 const sourceCache = new Map<string, Promise<PresetSource>>()
+const resolved = new Map<string, PresetSource>()
+
+/** Manifest written by `scripts/maps-manifest.mjs` at build time: preset id → file paths under /maps/. */
+type MapsManifest = Record<string, string[]>
+let manifestPromise: Promise<MapsManifest | null> | null = null
+
+const baseUrl = () => import.meta.env.BASE_URL.replace(/\/$/, '')
+
+function loadManifest(): Promise<MapsManifest | null> {
+  if (!manifestPromise) {
+    manifestPromise = fetch(`${baseUrl()}/maps/manifest.json`, { cache: 'no-cache' })
+      .then(async (r) => {
+        if (!r.ok) return null
+        // SPA hosts rewrite unknown paths to index.html; guard against HTML.
+        const text = await r.text()
+        try {
+          const json = JSON.parse(text) as MapsManifest
+          return json && typeof json === 'object' ? json : null
+        } catch {
+          return null
+        }
+      })
+      .catch(() => null)
+  }
+  return manifestPromise
+}
 
 function probeImage(url: string): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
     const img = new Image()
-    img.onload = () => resolve(img)
-    // SPA hosts rewrite unknown paths to index.html, which fails to decode as an image.
+    img.onload = () => resolve(img.naturalWidth > 0 ? img : null)
+    // index.html fallbacks fail to decode as an image and land here.
     img.onerror = () => resolve(null)
     img.src = url
   })
 }
 
+/** Without a manifest, look for the conventional file names inside the preset folder. */
+async function probeFolder(preset: MapPresetId): Promise<{ name: string; img: HTMLImageElement }[]> {
+  const base = baseUrl()
+  const folder = `${base}/maps/${MAP_FOLDERS[preset]}`
+  const singles = [...REAL_MAP_EXTENSIONS.map((e) => `${base}/maps/${preset}.${e}`), ...['full', 'minimap', 'map'].flatMap((n) => REAL_MAP_EXTENSIONS.map((e) => `${folder}/${n}.${e}`))]
+  for (const url of singles) {
+    const img = await probeImage(url)
+    if (img) return [{ name: url, img }]
+  }
+  // Standard GTA V minimap grid: 3 columns × 4 rows.
+  for (const prefix of ['minimap_sea_', 'minimap_', 'tile_']) {
+    for (const ext of ['png', 'jpg', 'webp']) {
+      const first = await probeImage(`${folder}/${prefix}0_0.${ext}`)
+      if (!first) continue
+      const tiles: { name: string; img: HTMLImageElement }[] = [{ name: `${prefix}0_0.${ext}`, img: first }]
+      const rest = await Promise.all(
+        Array.from({ length: 12 }, (_, i) => [i % 3, Math.floor(i / 3)] as const)
+          .filter(([c, r]) => !(c === 0 && r === 0))
+          .map(async ([c, r]) => ({ name: `${prefix}${c}_${r}.${ext}`, img: await probeImage(`${folder}/${prefix}${c}_${r}.${ext}`) })),
+      )
+      for (const t of rest) if (t.img) tiles.push({ name: t.name, img: t.img })
+      return tiles
+    }
+  }
+  return []
+}
+
+async function loadFromManifest(preset: MapPresetId, manifest: MapsManifest): Promise<{ name: string; img: HTMLImageElement }[]> {
+  const files = manifest[preset] ?? manifest[MAP_FOLDERS[preset]] ?? []
+  const base = baseUrl()
+  const loaded = await Promise.all(files.map(async (f) => ({ name: f.split('/').pop() ?? f, img: await probeImage(`${base}/maps/${f}`) })))
+  return loaded.filter((l): l is { name: string; img: HTMLImageElement } => !!l.img)
+}
+
 /**
- * Resolves the source for a preset. Real GTA V textures dropped into
- * `public/maps/<preset>.(jpg|png|webp)` take priority over the procedural map,
- * so server owners can ship their own licensed assets without code changes.
+ * Resolves the texture for a preset. Real GTA V maps placed under
+ * `public/maps/<folder>/` (single image or `*_X_Y` tiles) take priority over
+ * the procedural map, so server owners can ship their own licensed assets
+ * without code changes.
  */
-export function resolvePresetSource(preset: Exclude<BaseMapPreset, 'custom'>): Promise<PresetSource> {
+export function resolvePresetSource(preset: MapPresetId): Promise<PresetSource> {
   let p = sourceCache.get(preset)
   if (!p) {
     p = (async () => {
-      const base = import.meta.env.BASE_URL.replace(/\/$/, '')
-      for (const ext of REAL_MAP_EXTENSIONS) {
-        const url = `${base}/maps/${preset}.${ext}`
-        const img = await probeImage(url)
-        if (img && img.naturalWidth > 0) {
-          return { src: url, width: img.naturalWidth, height: img.naturalHeight, real: true, preview: url }
-        }
+      const manifest = await loadManifest()
+      const items = manifest ? await loadFromManifest(preset, manifest) : await probeFolder(preset)
+      let source: PresetSource
+      if (items.length === 1) {
+        const { img } = items[0]
+        source = { src: img.src, width: img.naturalWidth, height: img.naturalHeight, real: true, preview: img.src, tiles: 1 }
+      } else if (items.length > 1) {
+        const map = assembleImages(items)
+        const blob = await new Promise<Blob | null>((res) => map.canvas.toBlob(res, 'image/png'))
+        const url = blob ? URL.createObjectURL(blob) : map.canvas.toDataURL('image/png')
+        source = { src: url, width: map.width, height: map.height, real: true, preview: url, tiles: map.tiles }
+      } else {
+        const preview = await getPresetMapAsync(preset)
+        source = { src: '', width: PRESET_SIZE.width, height: PRESET_SIZE.height, real: false, preview, tiles: 0 }
       }
-      const preview = await getPresetMapAsync(preset)
-      return { src: '', width: PRESET_SIZE.width, height: PRESET_SIZE.height, real: false, preview }
+      resolved.set(preset, source)
+      return source
     })()
     sourceCache.set(preset, p)
   }
   return p
 }
+
+/** Synchronous view of an already-resolved preset (undefined until `resolvePresetSource` settles). */
+export const getResolvedPreset = (preset: MapPresetId) => resolved.get(preset)

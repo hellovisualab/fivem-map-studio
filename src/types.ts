@@ -135,7 +135,9 @@ export type MapElement = TextElement | ImageElement | ZoneElement | LineElement 
 
 export type ElementType = MapElement['type']
 
-export type BaseMapPreset = 'color' | 'original' | 'satellite' | 'realmap' | 'custom'
+export type BaseMapPreset = 'color' | 'original' | 'satellite' | 'realmap' | 'realmapdown' | 'custom'
+
+export type MapPresetId = Exclude<BaseMapPreset, 'custom'>
 
 export interface GradientOverlay {
   enabled: boolean
@@ -150,7 +152,7 @@ export interface GradientOverlay {
 export interface MapGlow {
   enabled: boolean
   color: string
-  /** Blur radius in map pixels. */
+  /** Blur radius in map pixels, relative to a 2048px-tall map (scaled with the texture). */
   size: number
   /** 1–3 passes; more = denser aura. */
   strength: number

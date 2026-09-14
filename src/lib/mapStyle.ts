@@ -183,7 +183,8 @@ export function composeBaseMap(img: CanvasImageSource, width: number, height: nu
     const small = makeCanvas(gw, gh)
     const gctx = small.getContext('2d')!
     gctx.shadowColor = rgba(s.glow.color, s.glow.opacity)
-    gctx.shadowBlur = s.glow.size * scale
+    // Glow size is specified for a 2048px-tall map so presets look alike on 1K tiles and 8K textures.
+    gctx.shadowBlur = s.glow.size * (Math.max(width, height) / 2048) * scale
     const passes = Math.max(1, Math.min(3, Math.round(s.glow.strength)))
     for (let i = 0; i < passes; i++) gctx.drawImage(silhouette, 0, 0)
 
