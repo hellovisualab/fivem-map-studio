@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { getPresetMapAsync } from '@/lib/basemaps'
+import { resolvePresetSource } from '@/lib/basemaps'
 import type { BaseMapPreset } from '@/types'
 import { cn } from '@/lib/utils'
 
@@ -9,7 +9,7 @@ export function MapBackdrop({ preset = 'original', className }: { preset?: Exclu
   const [src, setSrc] = useState<string | null>(null)
   useEffect(() => {
     let alive = true
-    getPresetMapAsync(preset).then((s) => alive && setSrc(s))
+    resolvePresetSource(preset).then((s) => alive && setSrc(s.preview))
     return () => {
       alive = false
     }

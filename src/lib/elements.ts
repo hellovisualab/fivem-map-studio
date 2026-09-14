@@ -103,15 +103,18 @@ export function createMarker(x: number, y: number, icon: MarkerIcon = 'custom'):
   }
 }
 
-export function createDocument(preset: BaseMapPreset, custom?: { src: string; width: number; height: number }): MapDocument {
-  const isCustom = preset === 'custom'
+/**
+ * @param source For `custom` the uploaded image; for presets, an optional real
+ *   texture resolved from /maps/ (empty src = procedural fallback).
+ */
+export function createDocument(preset: BaseMapPreset, source?: { src: string; width: number; height: number }): MapDocument {
   return {
     version: 1,
     baseMap: {
       preset,
-      src: isCustom ? custom?.src ?? '' : '',
-      width: isCustom ? custom?.width ?? PRESET_SIZE.width : PRESET_SIZE.width,
-      height: isCustom ? custom?.height ?? PRESET_SIZE.height : PRESET_SIZE.height,
+      src: source?.src ?? '',
+      width: source?.width ?? PRESET_SIZE.width,
+      height: source?.height ?? PRESET_SIZE.height,
       tint: '#ff8a1f',
       tintOpacity: 0,
       brightness: 1,

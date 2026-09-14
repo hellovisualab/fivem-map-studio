@@ -6,7 +6,7 @@ import { Navbar } from '@/components/layout/Navbar'
 import { Button } from '@/components/ui/Button'
 import { toast } from '@/components/ui/Toast'
 import { PRESETS } from '@/lib/constants'
-import { getPresetMapAsync } from '@/lib/basemaps'
+import { resolvePresetSource, type PresetSource } from '@/lib/basemaps'
 import { createDocument } from '@/lib/elements'
 import { importMinimapFiles, type ImportResult } from '@/lib/importer'
 import { getData } from '@/lib/data'
@@ -19,7 +19,7 @@ export function NewProject({ importMode = false }: { importMode?: boolean }) {
   const user = useAuth((s) => s.user)
   const [name, setName] = useState('')
   const [preset, setPreset] = useState<BaseMapPreset>(importMode ? 'custom' : 'color')
-  const [previews, setPreviews] = useState<Partial<Record<BaseMapPreset, string>>>({})
+  const [sources, setSources] = useState<Partial<Record<BaseMapPreset, PresetSource>>>({})
   const [custom, setCustom] = useState<ImportResult | null>(null)
   const [importing, setImporting] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -31,9 +31,9 @@ export function NewProject({ importMode = false }: { importMode?: boolean }) {
     const ids: Exclude<BaseMapPreset, 'custom'>[] = ['color', 'original', 'satellite', 'realmap']
     ;(async () => {
       for (const id of ids) {
-        const src = await getPresetMapAsync(id)
+        const source = await resolvePresetSource(id)
         if (!alive) return
-        setPreviews((p) => ({ ...p, [id]: src }))
+        setSources((p) => ({ ...p, [id]: source }))
       }
     })()
     return () => {
@@ -58,7 +58,8 @@ export function NewProject({ importMode = false }: { importMode?: boolean }) {
     }
   }, [])
 
-  const previewSrc = preset === 'custom' ? custom?.src : previews[preset]
+  const previewSrc = preset === 'custom' ? custom?.src : sources[preset]?.preview
+  const selectedSource = preset === 'custom' ? null : sources[preset]
 
   const create = async () => {
     if (!user) return
@@ -75,7 +76,7 @@ export function NewProject({ importMode = false }: { importMode?: boolean }) {
         name: name.trim() || (preset === 'custom' ? 'Imported minimap' : 'Untitled minimap'),
         createdAt: now,
         updatedAt: now,
-        document: createDocument(preset, custom ?? undefined),
+        document: createDocument(preset, preset === 'custom' ? custom ?? undefined : selectedSource?.real ? selectedSource : undefined),
       }
       const data = getData()
       await data.createProject(project)
@@ -114,10 +115,19 @@ export function NewProject({ importMode = false }: { importMode?: boolean }) {
 
             <div>
               <span className="label">Start from a preset</span>
+              {Object.values(sources).length > 0 && !Object.values(sources).some((s) => s?.real) && (
+                <p className="mb-3 rounded-xl border border-ink-700 bg-ink-850/70 px-3 py-2 text-xs text-ink-400">
+                  Presets are stylized previews. Drop your own GTA V minimap textures in <code className="rounded bg-ink-800 px-1 text-ink-300">public/maps/</code>{' '}
+                  (<code className="rounded bg-ink-800 px-1 text-ink-300">color.jpg</code>, <code className="rounded bg-ink-800 px-1 text-ink-300">original.jpg</code>…) to use the real
+                  maps, or import them below.
+                </p>
+              )}
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {PRESETS.map((p) => {
                   const active = preset === p.id
-                  const src = p.id === 'custom' ? custom?.src : previews[p.id]
+                  const source = p.id === 'custom' ? undefined : sources[p.id]
+                  const src = p.id === 'custom' ? custom?.src : source?.preview
+                  const tag = p.id === 'custom' ? p.tag : source ? (source.real ? `${source.width}×${source.height}` : 'Stylized preview') : '…'
                   return (
                     <motion.button
                       key={p.id}
@@ -151,8 +161,13 @@ export function NewProject({ importMode = false }: { importMode?: boolean }) {
                       </div>
                       <div className="px-3 py-2.5">
                         <p className="text-sm font-semibold">{p.name}</p>
-                        <span className="mt-1 inline-block rounded-md border border-brand-500/30 bg-brand-500/10 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-brand-300 uppercase">
-                          {p.tag}
+                        <span
+                          className={cn(
+                            'mt-1 inline-block rounded-md border px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase',
+                            source && !source.real ? 'border-ink-600 bg-ink-800 text-ink-400' : 'border-brand-500/30 bg-brand-500/10 text-brand-300',
+                          )}
+                        >
+                          {tag}
                         </span>
                       </div>
                     </motion.button>

@@ -114,6 +114,6 @@ Browsers cannot write `.ytd` texture dictionaries, so the exporter ships ready-t
 
 ## Notes
 
-- Base map presets are generated procedurally at runtime (stylized San Andreas silhouette) to avoid shipping copyrighted Rockstar textures. Upload your own minimap for a faithful base.
+- Base map presets are generated procedurally at runtime (stylized San Andreas silhouette) to avoid shipping copyrighted Rockstar textures. To use the **real GTA V maps**, drop your own textures in `public/maps/` (`color.jpg`, `original.jpg`, `satellite.jpg`, `realmap.jpg`) — they replace the stylized presets automatically. See [`public/maps/README.md`](public/maps/README.md) for details, or upload a minimap per project via *Custom Upload*.
 - Payments are not wired up; the Supporter upgrade in the dashboard simulates a successful checkout so the plan logic can be tested.
 - FiveM Map Studio is a community tool and is not affiliated with Rockstar Games or Cfx.re.

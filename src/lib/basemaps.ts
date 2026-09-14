@@ -419,3 +419,52 @@ export function getPresetMapAsync(preset: Exclude<BaseMapPreset, 'custom'>): Pro
     setTimeout(() => resolve(getPresetMap(preset)), 20)
   })
 }
+
+export interface PresetSource {
+  /** URL to use as the document base map. Empty string = procedural fallback. */
+  src: string
+  width: number
+  height: number
+  /** True when a real texture was found under /maps/. */
+  real: boolean
+  /** Displayable URL (real texture or procedural data URL). */
+  preview: string
+}
+
+const REAL_MAP_EXTENSIONS = ['jpg', 'png', 'webp', 'jpeg']
+const sourceCache = new Map<string, Promise<PresetSource>>()
+
+function probeImage(url: string): Promise<HTMLImageElement | null> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    // SPA hosts rewrite unknown paths to index.html, which fails to decode as an image.
+    img.onerror = () => resolve(null)
+    img.src = url
+  })
+}
+
+/**
+ * Resolves the source for a preset. Real GTA V textures dropped into
+ * `public/maps/<preset>.(jpg|png|webp)` take priority over the procedural map,
+ * so server owners can ship their own licensed assets without code changes.
+ */
+export function resolvePresetSource(preset: Exclude<BaseMapPreset, 'custom'>): Promise<PresetSource> {
+  let p = sourceCache.get(preset)
+  if (!p) {
+    p = (async () => {
+      const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+      for (const ext of REAL_MAP_EXTENSIONS) {
+        const url = `${base}/maps/${preset}.${ext}`
+        const img = await probeImage(url)
+        if (img && img.naturalWidth > 0) {
+          return { src: url, width: img.naturalWidth, height: img.naturalHeight, real: true, preview: url }
+        }
+      }
+      const preview = await getPresetMapAsync(preset)
+      return { src: '', width: PRESET_SIZE.width, height: PRESET_SIZE.height, real: false, preview }
+    })()
+    sourceCache.set(preset, p)
+  }
+  return p
+}
