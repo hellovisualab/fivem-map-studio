@@ -18,7 +18,6 @@ landing page:
 
 Inside each folder put **one of**:
 
-- a single composited image (any file name; `.png`, `.jpg`, `.webp` or `.dds`), **or**
 - a single composited image (any file name; `.png`, `.jpg`, `.webp` or `.dds`),
 - a **ZIP** containing the image or the tiles (unpacked in the browser), or
 - the tile set exported from the game, e.g. `minimap_sea_0_0.dds` … `minimap_sea_2_1.dds`
