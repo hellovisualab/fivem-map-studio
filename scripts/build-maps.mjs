@@ -185,6 +185,18 @@ function encodePng(data, w, h) {
   ])
 }
 
+/** High-quality resize so the longest side is exactly `maxSide` (requires sharp). */
+async function resizeExact(img, maxSide) {
+  const scale = maxSide / Math.max(img.width, img.height)
+  const width = Math.max(1, Math.round(img.width * scale))
+  const height = Math.max(1, Math.round(img.height * scale))
+  const { data } = await sharp(Buffer.from(img.data.buffer, img.data.byteOffset, img.data.byteLength), { raw: { width: img.width, height: img.height, channels: 4 } })
+    .resize(width, height, { kernel: 'lanczos3' })
+    .raw()
+    .toBuffer({ resolveWithObject: true })
+  return { data: new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength), width, height }
+}
+
 async function writeImage(file, img) {
   if (sharp) {
     await sharp(Buffer.from(img.data.buffer, img.data.byteOffset, img.data.byteLength), { raw: { width: img.width, height: img.height, channels: 4 } })
@@ -211,6 +223,8 @@ async function buildPreset(preset, files, prevEntry) {
   const hash = createHash('sha1')
   for (const f of files) hash.update(`${toPosix(relative(mapsDir, f))}:${statSync(f).size}:${statSync(f).mtimeMs}`)
   hash.update(sharp ? 'webp' : 'png')
+  // Invalidate when the pipeline itself changes (e.g. different sizing rules).
+  hash.update(readFileSync(fileURLToPath(import.meta.url)))
   const key = hash.digest('hex').slice(0, 10)
   const fullName = `_generated/${preset}-${key}.${ext()}`
   const previewName = `_generated/${preset}-${key}-preview.${ext()}`
@@ -246,12 +260,14 @@ async function buildPreset(preset, files, prevEntry) {
     if (!tileW) {
       tileW = img.width
       tileH = img.height
-      // ceil(tile/factor)*axis can overshoot FULL_MAX_SIDE (e.g. 3×ceil(4096/3)=4098),
-      // which blanks the editor canvas on GPUs/browsers with a 4096 texture limit.
+      // Integer box-filter factor. ceil(tile/factor)*axis may overshoot FULL_MAX_SIDE by a
+      // few pixels (3×ceil(4096/3) = 4098), which blanks the editor canvas on GPUs with a
+      // 4096 texture limit, so the composite is fitted exactly afterwards.
       const axis = Math.max(nA, nB)
       const side = Math.max(tileW, tileH)
-      factor = 1
-      while (Math.ceil(side / factor) * axis > FULL_MAX_SIDE) factor++
+      factor = Math.max(1, Math.ceil((side * axis) / FULL_MAX_SIDE))
+      // Without sharp there is no exact resize step: pick the next integer factor that fits.
+      if (!sharp) while (Math.ceil(side / factor) * axis > FULL_MAX_SIDE) factor++
     } else if (img.width !== tileW || img.height !== tileH) {
       entry.errors.push(`${t.name}: tile is ${img.width}×${img.height} but others are ${tileW}×${tileH}`)
       return entry
@@ -267,15 +283,16 @@ async function buildPreset(preset, files, prevEntry) {
   let full = { data: new Uint8ClampedArray(cols * sw * rows * sh * 4), width: cols * sw, height: rows * sh }
   for (const p of placed) blit(full.data, full.width, p.small.data, p.small.width, p.small.height, p.col * sw, p.row * sh)
 
-  // Final safety clamp if orientation made the other axis the long one.
+  // Fit exactly inside FULL_MAX_SIDE (Lanczos via sharp; integer clamp otherwise).
   const over = Math.max(full.width, full.height)
   if (over > FULL_MAX_SIDE) {
-    const clamp = Math.max(1, Math.ceil(over / FULL_MAX_SIDE))
-    full = downsample(full.data, full.width, full.height, clamp)
+    if (sharp) full = await resizeExact(full, FULL_MAX_SIDE)
+    else full = downsample(full.data, full.width, full.height, Math.ceil(over / FULL_MAX_SIDE))
   }
 
-  const previewFactor = Math.max(1, Math.ceil(Math.max(full.width, full.height) / PREVIEW_MAX_SIDE))
-  const preview = downsample(full.data, full.width, full.height, previewFactor)
+  const preview = sharp
+    ? await resizeExact(full, PREVIEW_MAX_SIDE)
+    : downsample(full.data, full.width, full.height, Math.max(1, Math.ceil(Math.max(full.width, full.height) / PREVIEW_MAX_SIDE)))
 
   mkdirSync(outDir, { recursive: true })
   await writeImage(join(mapsDir, fullName), full)
