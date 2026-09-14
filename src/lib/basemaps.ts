@@ -1,6 +1,6 @@
 import type { BaseMapPreset, MapPresetId } from '@/types'
 import { MAP_FOLDERS } from './constants'
-import { isDds, loadDdsImage } from './dds'
+import { ddsBufferToImage, isDds, loadDdsImage } from './dds'
 import { assembleImages } from './importer'
 
 export const PRESET_SIZE = { width: 1536, height: 2048 }
@@ -491,6 +491,15 @@ export interface PresetSource {
   preview: string
   /** Number of tiles stitched (1 for a single image). */
   tiles: number
+  /** Files the lookup considered (from the manifest or folder probing). */
+  files: string[]
+  /** Human-readable reasons why files were skipped; empty when everything decoded. */
+  errors: string[]
+}
+
+interface LoadedItem {
+  name: string
+  img: HTMLImageElement
 }
 
 const REAL_MAP_EXTENSIONS = ['jpg', 'png', 'webp', 'jpeg', 'dds']
@@ -502,6 +511,7 @@ type MapsManifest = Record<string, string[]>
 let manifestPromise: Promise<MapsManifest | null> | null = null
 
 const baseUrl = () => import.meta.env.BASE_URL.replace(/\/$/, '')
+const mapsUrl = (path: string) => `${baseUrl()}/maps/${path.split('/').map(encodeURIComponent).join('/')}`
 
 function loadManifest(): Promise<MapsManifest | null> {
   if (!manifestPromise) {
@@ -522,75 +532,134 @@ function loadManifest(): Promise<MapsManifest | null> {
   return manifestPromise
 }
 
-function probeImage(url: string): Promise<HTMLImageElement | null> {
-  if (isDds(url)) return loadDdsImage(url)
+/** Whether a build-time manifest was served (null until the first lookup settles). */
+export async function hasMapsManifest(): Promise<boolean> {
+  return (await loadManifest()) !== null
+}
+
+function loadPlainImage(url: string): Promise<{ img: HTMLImageElement | null; error?: string }> {
   return new Promise((resolve) => {
     const img = new Image()
-    img.onload = () => resolve(img.naturalWidth > 0 ? img : null)
+    img.onload = () => resolve(img.naturalWidth > 0 ? { img } : { img: null, error: 'empty image' })
     // index.html fallbacks fail to decode as an image and land here.
-    img.onerror = () => resolve(null)
+    img.onerror = () => resolve({ img: null, error: 'not found or not a decodable image' })
     img.src = url
   })
 }
 
+/** Extracts every image / DDS inside a ZIP served from /maps/. */
+async function loadZip(url: string, errors: string[]): Promise<LoadedItem[]> {
+  const res = await fetch(url)
+  if (!res.ok) {
+    errors.push(`${url}: HTTP ${res.status}`)
+    return []
+  }
+  const { default: JSZip } = await import('jszip')
+  const zip = await JSZip.loadAsync(await res.arrayBuffer())
+  const items: LoadedItem[] = []
+  for (const entry of Object.values(zip.files)) {
+    if (entry.dir) continue
+    const name = entry.name.split('/').pop() ?? entry.name
+    try {
+      if (isDds(name)) {
+        items.push({ name, img: await ddsBufferToImage(await entry.async('arraybuffer')) })
+      } else if (/\.(png|jpe?g|webp)$/i.test(name)) {
+        const blob = await entry.async('blob')
+        const { img, error } = await loadPlainImage(URL.createObjectURL(blob))
+        if (img) items.push({ name, img })
+        else errors.push(`${name}: ${error}`)
+      }
+    } catch (e) {
+      errors.push(`${name}: ${(e as Error).message}`)
+    }
+  }
+  return items
+}
+
+function probeImage(url: string): Promise<{ img: HTMLImageElement | null; error?: string }> {
+  if (isDds(url)) return loadDdsImage(url)
+  return loadPlainImage(url)
+}
+
 /** Without a manifest, look for the conventional file names inside the preset folder. */
-async function probeFolder(preset: MapPresetId): Promise<{ name: string; img: HTMLImageElement }[]> {
-  const base = baseUrl()
-  const folder = `${base}/maps/${MAP_FOLDERS[preset]}`
-  const singles = [...REAL_MAP_EXTENSIONS.map((e) => `${base}/maps/${preset}.${e}`), ...['full', 'minimap', 'map'].flatMap((n) => REAL_MAP_EXTENSIONS.map((e) => `${folder}/${n}.${e}`))]
-  for (const url of singles) {
-    const img = await probeImage(url)
-    if (img) return [{ name: url, img }]
+async function probeFolder(preset: MapPresetId, errors: string[]): Promise<{ items: LoadedItem[]; files: string[] }> {
+  const folder = MAP_FOLDERS[preset]
+  const singles = [...REAL_MAP_EXTENSIONS.map((e) => `${preset}.${e}`), ...['full', 'minimap', 'map'].flatMap((n) => REAL_MAP_EXTENSIONS.map((e) => `${folder}/${n}.${e}`))]
+  for (const path of singles) {
+    const { img } = await probeImage(mapsUrl(path))
+    if (img) return { items: [{ name: path, img }], files: [path] }
   }
   // Standard GTA V minimap grid: 3 columns × 4 rows.
   for (const prefix of ['minimap_sea_', 'minimap_', 'tile_']) {
     for (const ext of ['png', 'dds', 'jpg', 'webp']) {
-      const first = await probeImage(`${folder}/${prefix}0_0.${ext}`)
-      if (!first) continue
-      const tiles: { name: string; img: HTMLImageElement }[] = [{ name: `${prefix}0_0.${ext}`, img: first }]
+      const firstPath = `${folder}/${prefix}0_0.${ext}`
+      const first = await probeImage(mapsUrl(firstPath))
+      if (!first.img) continue
+      const items: LoadedItem[] = [{ name: `${prefix}0_0.${ext}`, img: first.img }]
+      const files = [firstPath]
       const rest = await Promise.all(
         Array.from({ length: 12 }, (_, i) => [i % 3, Math.floor(i / 3)] as const)
           .filter(([c, r]) => !(c === 0 && r === 0))
-          .map(async ([c, r]) => ({ name: `${prefix}${c}_${r}.${ext}`, img: await probeImage(`${folder}/${prefix}${c}_${r}.${ext}`) })),
+          .map(async ([c, r]) => {
+            const name = `${prefix}${c}_${r}.${ext}`
+            return { name, ...(await probeImage(mapsUrl(`${folder}/${name}`))) }
+          }),
       )
-      for (const t of rest) if (t.img) tiles.push({ name: t.name, img: t.img })
-      return tiles
+      for (const t of rest) {
+        if (t.img) {
+          items.push({ name: t.name, img: t.img })
+          files.push(`${folder}/${t.name}`)
+        } else if (t.error && !/not found/.test(t.error)) errors.push(`${t.name}: ${t.error}`)
+      }
+      return { items, files }
     }
   }
-  return []
+  return { items: [], files: [] }
 }
 
-async function loadFromManifest(preset: MapPresetId, manifest: MapsManifest): Promise<{ name: string; img: HTMLImageElement }[]> {
+async function loadFromManifest(preset: MapPresetId, manifest: MapsManifest, errors: string[]): Promise<{ items: LoadedItem[]; files: string[] }> {
   const files = manifest[preset] ?? manifest[MAP_FOLDERS[preset]] ?? []
-  const base = baseUrl()
-  const loaded = await Promise.all(files.map(async (f) => ({ name: f.split('/').pop() ?? f, img: await probeImage(`${base}/maps/${f}`) })))
-  return loaded.filter((l): l is { name: string; img: HTMLImageElement } => !!l.img)
+  const items: LoadedItem[] = []
+  await Promise.all(
+    files.map(async (f) => {
+      const name = f.split('/').pop() ?? f
+      if (/\.zip$/i.test(name)) {
+        items.push(...(await loadZip(mapsUrl(f), errors)))
+        return
+      }
+      const { img, error } = await probeImage(mapsUrl(f))
+      if (img) items.push({ name, img })
+      else errors.push(`${name}: ${error ?? 'could not load'}`)
+    }),
+  )
+  return { items, files }
 }
 
 /**
  * Resolves the texture for a preset. Real GTA V maps placed under
- * `public/maps/<folder>/` (single image or `*_X_Y` tiles) take priority over
- * the procedural map, so server owners can ship their own licensed assets
- * without code changes.
+ * `public/maps/<folder>/` (single image, `*_X_Y` tiles or a ZIP of either)
+ * take priority over the procedural map, so server owners can ship their own
+ * licensed assets without code changes.
  */
 export function resolvePresetSource(preset: MapPresetId): Promise<PresetSource> {
   let p = sourceCache.get(preset)
   if (!p) {
     p = (async () => {
+      const errors: string[] = []
       const manifest = await loadManifest()
-      const items = manifest ? await loadFromManifest(preset, manifest) : await probeFolder(preset)
+      const { items, files } = manifest ? await loadFromManifest(preset, manifest, errors) : await probeFolder(preset, errors)
       let source: PresetSource
       if (items.length === 1) {
         const { img } = items[0]
-        source = { src: img.src, width: img.naturalWidth, height: img.naturalHeight, real: true, preview: img.src, tiles: 1 }
+        source = { src: img.src, width: img.naturalWidth, height: img.naturalHeight, real: true, preview: img.src, tiles: 1, files, errors }
       } else if (items.length > 1) {
         const map = assembleImages(items)
         const blob = await new Promise<Blob | null>((res) => map.canvas.toBlob(res, 'image/png'))
         const url = blob ? URL.createObjectURL(blob) : map.canvas.toDataURL('image/png')
-        source = { src: url, width: map.width, height: map.height, real: true, preview: url, tiles: map.tiles }
+        source = { src: url, width: map.width, height: map.height, real: true, preview: url, tiles: map.tiles, files, errors }
       } else {
         const preview = await getPresetMapAsync(preset)
-        source = { src: '', width: PRESET_SIZE.width, height: PRESET_SIZE.height, real: false, preview, tiles: 0 }
+        source = { src: '', width: PRESET_SIZE.width, height: PRESET_SIZE.height, real: false, preview, tiles: 0, files, errors }
       }
       resolved.set(preset, source)
       return source

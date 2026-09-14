@@ -17,6 +17,7 @@ const FOLDERS = {
   realmapdown: 'real-map-down',
 }
 const IMAGE_RE = /\.(png|jpe?g|webp|dds)$/i
+const ASSET_RE = /\.(png|jpe?g|webp|dds|zip)$/i
 const TILE_RE = /(\d+)[_-](\d+)\.(png|jpe?g|webp|dds)$/i
 
 function listImages(dir) {
@@ -25,7 +26,7 @@ function listImages(dir) {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name)
     if (statSync(p).isDirectory()) out.push(...listImages(p))
-    else if (IMAGE_RE.test(name)) out.push(p)
+    else if (ASSET_RE.test(name)) out.push(p)
   }
   return out
 }
@@ -43,8 +44,13 @@ for (const [preset, folder] of Object.entries(FOLDERS)) {
   }
   if (!files.length) continue
   const tiles = files.filter((f) => TILE_RE.test(f))
-  // Prefer a tile set when present; otherwise the largest single image.
-  const chosen = tiles.length > 1 ? tiles : [files.map((f) => ({ f, size: statSync(f).size })).sort((a, b) => b.size - a.size)[0].f]
+  const zips = files.filter((f) => /\.zip$/i.test(f))
+  const images = files.filter((f) => IMAGE_RE.test(f))
+  // Prefer a tile set, then a ZIP (unpacked in the browser), then the largest single image.
+  let chosen
+  if (tiles.length > 1) chosen = tiles
+  else if (zips.length) chosen = [zips.map((f) => ({ f, size: statSync(f).size })).sort((a, b) => b.size - a.size)[0].f]
+  else chosen = [images.map((f) => ({ f, size: statSync(f).size })).sort((a, b) => b.size - a.size)[0].f]
   manifest[preset] = chosen.map((f) => relative(mapsDir, f).split(sep).join('/')).sort()
 }
 
@@ -54,4 +60,5 @@ if (existsSync(mapsDir)) {
     .map(([k, v]) => `${k}: ${v.length} file${v.length === 1 ? '' : 's'}`)
     .join(', ')
   console.log(`[maps] manifest written (${summary || 'no real textures, procedural presets will be used'})`)
+  for (const [k, v] of Object.entries(manifest)) console.log(`[maps]   ${k}: ${v.join(', ')}`)
 }

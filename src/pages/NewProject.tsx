@@ -6,13 +6,59 @@ import { Navbar } from '@/components/layout/Navbar'
 import { Button } from '@/components/ui/Button'
 import { toast } from '@/components/ui/Toast'
 import { MAP_FOLDERS, MAP_PRESET_IDS, PRESETS } from '@/lib/constants'
-import { resolvePresetSource, type PresetSource } from '@/lib/basemaps'
+import { hasMapsManifest, resolvePresetSource, type PresetSource } from '@/lib/basemaps'
 import { createDocument } from '@/lib/elements'
 import { importMinimapFiles, type ImportResult } from '@/lib/importer'
 import { getData } from '@/lib/data'
 import { useAuth } from '@/store/useAuth'
 import { cn, uid } from '@/lib/utils'
 import type { BaseMapPreset, HistoryEntry, Project } from '@/types'
+
+/**
+ * Explains why a preset is still stylized when files exist under /maps/ (bad
+ * format, unsupported DDS codec, missing manifest…). Hidden when all is well.
+ */
+function TextureDiagnostics({ sources }: { sources: Partial<Record<BaseMapPreset, PresetSource>> }) {
+  const [manifest, setManifest] = useState<boolean | null>(null)
+  useEffect(() => {
+    let alive = true
+    hasMapsManifest().then((v) => alive && setManifest(v))
+    return () => {
+      alive = false
+    }
+  }, [])
+  const entries = MAP_PRESET_IDS.map((id) => [id, sources[id]] as const).filter(([, s]) => s && (s.errors.length > 0 || (s.files.length > 0 && !s.real)))
+  const allSettled = MAP_PRESET_IDS.every((id) => sources[id])
+  if (!entries.length && manifest !== false) return null
+  if (!allSettled) return null
+  return (
+    <div className="mb-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-200/90">
+      <p className="font-semibold text-amber-300">Texture diagnostics</p>
+      {manifest === false && (
+        <p className="mt-1 text-amber-200/80">
+          <code className="rounded bg-ink-800 px-1">maps/manifest.json</code> was not served. The build must run <code className="rounded bg-ink-800 px-1">npm run build</code> (which indexes{' '}
+          <code className="rounded bg-ink-800 px-1">public/maps/*</code>); the app fell back to probing standard file names.
+        </p>
+      )}
+      {entries.map(([id, s]) => (
+        <div key={id} className="mt-1.5">
+          <p className="text-ink-200">
+            {PRESETS.find((p) => p.id === id)?.name} · <code className="rounded bg-ink-800 px-1 text-ink-300">public/maps/{MAP_FOLDERS[id]}/</code>
+            {s!.files.length ? ` · ${s!.files.length} file${s!.files.length === 1 ? '' : 's'} indexed` : ' · no files indexed'}
+          </p>
+          <ul className="ml-3 list-disc text-amber-200/80">
+            {s!.errors.slice(0, 6).map((e, i) => (
+              <li key={i} className="break-all">
+                {e}
+              </li>
+            ))}
+            {s!.errors.length > 6 && <li>… {s!.errors.length - 6} more</li>}
+          </ul>
+        </div>
+      ))}
+    </div>
+  )
+}
 
 export function NewProject({ importMode = false }: { importMode?: boolean }) {
   const navigate = useNavigate()
@@ -134,6 +180,7 @@ export function NewProject({ importMode = false }: { importMode?: boolean }) {
                   to use the real maps, or import them below.
                 </p>
               )}
+              <TextureDiagnostics sources={sources} />
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {PRESETS.map((p) => {
                   const active = preset === p.id
