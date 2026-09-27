@@ -4,8 +4,8 @@ import { absolutePoints, canvasToWorld, polygonCentroid } from './geometry'
 import { canvasToBlob, renderDocument } from './render'
 import { CAYO_PERICO, isInCayo } from './cayo'
 import { mapFrame, type PixelRect } from './mapFrame'
-import { overlayFxOf, overlayIndexHtml, overlayFxDriverJs } from './overlayFx'
-import overlayFxCss from './overlayFx.css?raw'
+import { overlayFxOf } from './overlayFx'
+import { nuiIndexHtml, nuiOverlayJs, nuiScriptJs, nuiStyleCss } from './overlayNui'
 import { hexToRgb, round, slugify } from './utils'
 
 export interface ExportOptions {
@@ -215,8 +215,8 @@ ui_page 'html/index.html'
 files {
     'html/index.html',
     'html/style.css',
+    'html/overlay.js',
     'html/script.js',
-    'html/overlay.png',
     'config/positions.json'
 }
 `
@@ -235,7 +235,8 @@ files {
 }`
 }
 
-function configLua(doc: MapDocument, data: ReturnType<typeof buildPositions>) {
+function configLua(doc: MapDocument, data: ReturnType<typeof buildPositions>, opts: ExportOptions) {
+  const fx = overlayFxOf(doc)
   const zones = data.zones
     .map(
       (z) => `    {
@@ -291,6 +292,25 @@ Config.ShowMarkerBlips = true
 -- Draw zone names as 3D text when the player is nearby.
 Config.DrawZoneNames = false
 ${
+  opts.includeHtml
+    ? `
+-- Animated effects drawn over the radar by html/ (NUI). The overlay follows the radar
+-- on any resolution, safe zone and aspect ratio, and hides with the pause menu, the
+-- expanded map or a hidden HUD. Players toggle it with /${OVERLAY_COMMAND} (remembered).
+Config.Overlay = {
+    Enabled = true,
+    Command = ${luaStr(OVERLAY_COMMAND)},
+    -- glow, radar, ripple, scanlines, pulse, heartbeat, breathe, shimmer, vignette, hue, flicker, glitch
+    Effects = { ${fx.ids.map(luaStr).join(', ')} },
+    Intensity = ${fx.intensity.toFixed(2)}, -- 0.0 - 1.0
+    Speed = ${fx.speed.toFixed(2)}, -- 0.25 - 3.0
+    Color = ${luaStr(fx.color)},
+    -- Nudge the overlay if another resource moves or resizes the radar (fractions of the screen).
+    Adjust = { x = 0.0, y = 0.0, width = 0.0, height = 0.0 }
+}
+`
+    : ''
+}${
   doc.cayoPerico
     ? `
 -- Cayo Perico island. Needs sv_enforceGameBuild ${CAYO_PERICO.minGameBuild} or newer in server.cfg.
@@ -352,21 +372,9 @@ local function createMarkerBlips()
     end
 end
 
--- Standard fix so a custom minimap texture keeps the right aspect ratio.
--- The textures themselves are replaced by the minimap_sea_R_C.ytd files in stream/.
-local function setupMinimap()
-    SetMinimapClipType(0)
-    SetMinimapComponentPosition("minimap", "L", "B", -0.0100, 0.030, 0.150, 0.188888)
-    SetMinimapComponentPosition("minimap_mask", "L", "B", 0.200, 0.0, 0.065, 0.20)
-    SetMinimapComponentPosition("minimap_blur", "L", "B", -0.00, 0.015, 0.252, 0.338)
-    SetBlipAlpha(GetNorthRadarBlip(), 0)
-    SetRadarBigmapEnabled(true, false)
-    Wait(0)
-    SetRadarBigmapEnabled(false, false)
-end
-
+-- The radar keeps its vanilla size and position: the minimap_sea_R_C.ytd files in
+-- stream/ replace its textures one to one.
 CreateThread(function()
-    setupMinimap()
     createZoneBlips()
     createMarkerBlips()
 end)
@@ -422,18 +430,7 @@ CreateThread(function()
         end
     end
 end)
-${
-  opts.includeHtml
-    ? `
--- /minimapoverlay toggles the HTML overlay (studio design + CSS effects).
-local overlayVisible = false
-RegisterCommand("minimapoverlay", function()
-    overlayVisible = not overlayVisible
-    SendNUIMessage({ action = "toggle", visible = overlayVisible })
-end, false)
-`
-    : ''
-}
+${opts.includeHtml ? overlayLua : ''}
 -- Exports for other resources
 exports("GetZones", function() return Config.Zones end)
 exports("GetMarkers", function() return Config.Markers end)
@@ -471,19 +468,89 @@ RegisterNetEvent("fms:requestZones", function()
 end)
 `
 
-const htmlCssBase = `html, body { margin: 0; background: transparent; overflow: hidden; }
-#overlay { position: fixed; left: 1.2vw; bottom: 2.4vh; width: 15vw; pointer-events: none; opacity: 0.9;
-  transition: opacity .2s ease; border-radius: 6px; }
-#overlay.hidden { opacity: 0; }
-#overlay img { width: 100%; height: auto; display: block; border-radius: 6px; }
-`
+const OVERLAY_COMMAND = 'minimapoverlay'
 
-const htmlJs = `window.addEventListener("message", (event) => {
-  const data = event.data || {};
-  if (data.action === "toggle") {
-    document.getElementById("overlay").classList.toggle("hidden", !data.visible);
-  }
-});
+/** Keeps the NUI effects canvas over the radar (see overlayNui.ts for the page side). */
+const overlayLua = `
+-- Animated overlay (html/): the NUI page paints Config.Overlay.Effects over the radar.
+local overlay = { ready = false, enabled = false }
+
+-- Screen rectangle of the vanilla radar (0-1). Size measured by glitchdetector
+-- (fivem-minimap-anchor): width = screen height / 4, height = screen height / 5.674,
+-- inset by the safe zone (5% per 0.1 below 1.0). Wider than 16:9, the HUD stays
+-- inside a centred 16:9 area.
+local function minimapRect()
+    local resX, resY = GetActiveScreenResolution()
+    local margin = (1.0 - GetSafeZoneSize()) * 0.5
+    local hudW = math.min(resX, resY * 16.0 / 9.0)
+    local hudX = (resX - hudW) / 2.0
+    local w, h = resY / 4.0, resY / 5.674
+    local adjust = Config.Overlay.Adjust or {}
+    return {
+        x = (hudX + hudW * margin) / resX + (adjust.x or 0.0),
+        y = (resY * (1.0 - margin) - h) / resY + (adjust.y or 0.0),
+        w = w / resX + (adjust.width or 0.0),
+        h = h / resY + (adjust.height or 0.0)
+    }
+end
+
+local function isOn(native)
+    return native ~= nil and native() == true
+end
+
+-- Only while the radar itself is on screen.
+local function overlayVisible()
+    return overlay.enabled
+        and not isOn(IsPauseMenuActive)
+        and not isOn(IsRadarHidden)
+        and not isOn(IsHudHidden)
+        and not isOn(IsBigmapActive)
+        and not isOn(IsPlayerSwitchInProgress)
+        and not isOn(IsScreenFadedOut)
+end
+
+local function sendOverlayConfig()
+    SendNUIMessage({
+        action = "fx:config",
+        fx = {
+            ids = Config.Overlay.Effects,
+            intensity = Config.Overlay.Intensity,
+            speed = Config.Overlay.Speed,
+            color = Config.Overlay.Color
+        }
+    })
+end
+
+local lastLayout, lastSend = nil, 0
+
+RegisterNUICallback("fxReady", function(_, cb)
+    overlay.ready = true
+    lastLayout = nil
+    sendOverlayConfig()
+    cb("ok")
+end)
+
+RegisterCommand(Config.Overlay.Command, function()
+    overlay.enabled = not overlay.enabled
+    SetResourceKvp("overlay", overlay.enabled and "on" or "off")
+end, false)
+
+CreateThread(function()
+    overlay.enabled = Config.Overlay.Enabled and GetResourceKvpString("overlay") ~= "off"
+    TriggerEvent("chat:addSuggestion", "/" .. Config.Overlay.Command, "Toggle the animated minimap overlay")
+    while true do
+        local visible = overlayVisible()
+        local rect = visible and minimapRect() or nil
+        local key = rect and string.format("%.4f %.4f %.4f %.4f", rect.x, rect.y, rect.w, rect.h) or "hidden"
+        -- Until the page has answered, keep re-sending: messages sent before it loads are lost.
+        if key ~= lastLayout or (not overlay.ready and GetGameTimer() - lastSend > 2000) then
+            if not overlay.ready then sendOverlayConfig() end
+            SendNUIMessage({ action = "fx:layout", visible = visible, rect = rect })
+            lastLayout, lastSend = key, GetGameTimer()
+        end
+        Wait(200)
+    end
+end)
 `
 
 const streamReadme = (cols: number, rows: number, cayo: boolean) => `HOW TO USE THESE TEXTURES
@@ -506,8 +573,7 @@ Steps:
   3. Save the ${cols * rows} .ytd files inside this stream/ folder and delete the PNGs
   4. Restart the resource: ensure ${'<resource>'} in server.cfg
 
-The client.lua already calls the standard SetMinimapComponentPosition fixes so the
-custom texture keeps the right aspect ratio.
+The tiles have the vanilla layout, so the radar keeps its normal size and position.
 ${
   cayo
     ? `
@@ -521,7 +587,7 @@ therefore only contain Los Santos; zones and markers on the island still become 
     : ''
 }`
 
-const readme = (name: string, project: Project) => `# ${name}
+const readme = (name: string, project: Project, overlay: boolean) => `# ${name}
 
 Generated with **LABSEVE7 Map Studio** from project "${project.name}".
 
@@ -542,12 +608,12 @@ are exported with real GTA coordinates and tagged \`region = "cayo_perico"\`.
 }
 ## Contents
 - \`fxmanifest.lua\` – resource manifest
-- \`client.lua\` – creates zone/marker blips and applies minimap fixes
+- \`client.lua\` – creates zone/marker blips${overlay ? ' and keeps the animated overlay on the radar' : ''}
 - \`config/config.lua\` – all zones, markers and labels in GTA world coordinates
 - \`config/*.json\` – the same data as JSON for other tools
 - \`config/project.json\` – full studio project (re-import it in LABSEVE7 Map Studio)
 - \`stream/\` – minimap textures
-- \`html/\` – optional NUI overlay with CSS effects (toggle with /minimapoverlay)
+${overlay ? `- \`html/\` – animated effects drawn over the radar (\`Config.Overlay\`, toggle with /${OVERLAY_COMMAND})\n` : ''}
 `
 
 /** Copies a rectangle (document pixels, clamped to the canvas) into a new canvas. */
@@ -577,10 +643,10 @@ export async function exportFiveMResource(project: Project, opts: ExportOptions)
   root.file('fxmanifest.lua', fxmanifest(name, opts))
   root.file('client.lua', clientLua(opts, doc))
   root.file('server.lua', serverLua)
-  root.file('README.md', readme(name, project))
+  root.file('README.md', readme(name, project, opts.includeHtml))
 
   const config = root.folder('config')!
-  config.file('config.lua', configLua(doc, data))
+  config.file('config.lua', configLua(doc, data, opts))
   config.file('zones.json', JSON.stringify(data.zones, null, 2))
   config.file('markers.json', JSON.stringify(data.markers, null, 2))
   config.file('labels.json', JSON.stringify(data.labels, null, 2))
@@ -656,14 +722,12 @@ export async function exportFiveMResource(project: Project, opts: ExportOptions)
   }
 
   if (opts.includeHtml) {
-    progress(75, 'Rendering NUI overlay')
-    const overlay = await renderDocument(doc, { overlayOnly: true, maxWidth: 1024 })
-    const fx = overlayFxOf(doc)
+    progress(80, 'Writing radar overlay')
     const html = root.folder('html')!
-    html.file('index.html', overlayIndexHtml(fx))
-    html.file('style.css', `${htmlCssBase}\n${overlayFxCss}`)
-    html.file('script.js', `${htmlJs}\n${overlayFxDriverJs}`)
-    html.file('overlay.png', await canvasToBlob(overlay, 'image/png'))
+    html.file('index.html', nuiIndexHtml)
+    html.file('style.css', nuiStyleCss)
+    html.file('overlay.js', nuiOverlayJs)
+    html.file('script.js', nuiScriptJs)
   }
 
   progress(90, 'Compressing ZIP')

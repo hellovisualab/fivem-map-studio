@@ -12,6 +12,7 @@ import { isClipped } from '@/lib/mapStyle'
 import { mapFrame } from '@/lib/mapFrame'
 import { useStyledBase } from '@/hooks/useStyledBase'
 import { useBaseSrc } from '@/hooks/useBaseSrc'
+import { useRadarPreviewSource } from '@/hooks/useRadarPreviewSource'
 import { getData } from '@/lib/data'
 import { clamp, loadImage, readFileAsDataURL } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
@@ -82,6 +83,8 @@ export function MapCanvas() {
   const baseSrc = useBaseSrc(doc)
   const [baseImg] = useImage(baseSrc, 'anonymous')
   const styled = useStyledBase(baseImg, doc)
+  const overlayFx = useMemo(() => overlayFxOf(doc), [doc])
+  useRadarPreviewSource(doc, styled, selectedIds, overlayFx.ids.length > 0)
   const clippedElements = useMemo(() => doc?.elements.filter(isClipped) ?? [], [doc?.elements])
   const freeElements = useMemo(() => doc?.elements.filter((e) => !isClipped(e)) ?? [], [doc?.elements])
 
@@ -670,16 +673,7 @@ export function MapCanvas() {
           </Layer>
         </Stage>
       )}
-      {size.w > 0 && (
-        <OverlayFxPreview
-          fx={overlayFxOf(doc)}
-          x={viewport.x}
-          y={viewport.y}
-          width={mapW * viewport.scale}
-          height={mapH * viewport.scale}
-          map={styled?.island}
-        />
-      )}
+      <OverlayFxPreview fx={overlayFx} />
 
       {editingText && (
         <textarea
