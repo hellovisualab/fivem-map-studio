@@ -9,6 +9,7 @@ import { useEditor } from '@/store/useEditor'
 import { useAuth } from '@/store/useAuth'
 import { exportFiveMResource, buildPositions } from '@/lib/exporter'
 import { overlayFxOf, OVERLAY_FX_BY_ID } from '@/lib/overlayFx'
+import { CAYO_PERICO } from '@/lib/cayo'
 import { getData } from '@/lib/data'
 import { downloadBlob, slugify, uid } from '@/lib/utils'
 import type { HistoryEntry } from '@/types'
@@ -40,6 +41,9 @@ export function ExportDialog({ open, onClose }: { open: boolean; onClose: () => 
   const stats = buildPositions(doc)
   const overlayFx = overlayFxOf(doc)
   const fxSummary = overlayFx.ids.map((id) => OVERLAY_FX_BY_ID[id].label).join(', ')
+  // The overlay only exists to play the effects; without any there is nothing to export.
+  const hasFx = overlayFx.ids.length > 0
+  const withOverlay = includeHtml && hasFx
   const locked = remaining !== null && remaining <= 0
 
   const run = async () => {
@@ -54,7 +58,7 @@ export function ExportDialog({ open, onClose }: { open: boolean; onClose: () => 
           resourceName,
           includeTextures,
           splitTiles,
-          includeHtml,
+          includeHtml: withOverlay,
           tileColumns: 2,
           tileRows: 3,
           onProgress: (pct, label) => setProgress({ pct, label }),
@@ -126,7 +130,14 @@ export function ExportDialog({ open, onClose }: { open: boolean; onClose: () => 
             {[
               { k: 'textures', label: 'Minimap textures (stream/)', desc: 'Full PNG render of your map', v: includeTextures, set: setIncludeTextures },
               { k: 'tiles', label: 'Split into 2×3 tiles', desc: 'minimap_sea_R_C.png (vanilla layout), one per minimap_sea_R_C.ytd', v: splitTiles && includeTextures, set: setSplitTiles, disabled: !includeTextures },
-              { k: 'html', label: 'NUI overlay (html/)', desc: overlayFx.ids.length ? `Animates ${fxSummary} · /minimapoverlay` : 'Toggle with /minimapoverlay in-game', v: includeHtml, set: setIncludeHtml },
+              {
+                k: 'html',
+                label: 'Animated radar overlay (html/)',
+                desc: hasFx ? `${fxSummary} over the in-game radar · /minimapoverlay` : 'Pick overlay effects under Map settings first',
+                v: withOverlay,
+                set: setIncludeHtml,
+                disabled: !hasFx,
+              },
             ].map((o) => (
               <label key={o.k} className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition ${o.v ? 'border-brand-500/40 bg-brand-500/5' : 'border-ink-700 hover:border-ink-500'} ${o.disabled ? 'opacity-50' : ''}`}>
                 <input type="checkbox" className="mt-0.5 accent-brand-500" checked={o.v} disabled={o.disabled} onChange={(e) => o.set(e.target.checked)} />
@@ -136,9 +147,7 @@ export function ExportDialog({ open, onClose }: { open: boolean; onClose: () => 
                 </span>
               </label>
             ))}
-            {overlayFx.ids.length > 0 && !includeHtml && (
-              <p className="text-[11px] text-amber-300">Overlay effects only run in the NUI overlay. Leave this enabled to export them.</p>
-            )}
+            {hasFx && !includeHtml && <p className="text-[11px] text-amber-300">Overlay effects only run in the NUI overlay. Leave this enabled to export them.</p>}
           </div>
 
           <div className="rounded-xl border border-ink-700 bg-ink-900/60 p-3 text-xs text-ink-400">
@@ -149,7 +158,7 @@ export function ExportDialog({ open, onClose }: { open: boolean; onClose: () => 
               {`├─ fxmanifest.lua
 ├─ client.lua · server.lua
 ├─ config/ config.lua · zones.json · markers.json · labels.json · positions.json
-${includeTextures ? `├─ stream/ minimap_full.png${splitTiles ? ' · minimap_sea_0_0…2_3.png' : ''}\n` : ''}${includeHtml ? '└─ html/ index.html · style.css · overlay.png' : '└─ README.md'}`}
+${includeTextures ? `├─ stream/ minimap_full.png${splitTiles ? ' · minimap_sea_0_0…2_1.png' : ''}${doc.cayoPerico ? ' · cayo_perico.png' : ''}\n` : ''}${withOverlay ? '└─ html/ index.html · overlay.js · script.js · style.css' : '└─ README.md'}`}
             </pre>
           </div>
         </div>
@@ -174,7 +183,12 @@ ${includeTextures ? `├─ stream/ minimap_full.png${splitTiles ? ' · minimap_
               <li>Zones &amp; blips in GTA coordinates</li>
               <li>JSON positions for other tools</li>
               <li>PNG tiles ready to pack into minimap_sea_*.ytd</li>
-              {overlayFx.ids.length > 0 && <li>NUI overlay effects ({overlayFx.ids.length})</li>}
+              {withOverlay && <li>Radar overlay effects ({overlayFx.ids.length})</li>}
+              {doc.cayoPerico && (
+                <li className="text-brand-300">
+                  {CAYO_PERICO.name} loader &amp; island blips (game build {CAYO_PERICO.minGameBuild}+)
+                </li>
+              )}
             </ul>
           </div>
         </aside>

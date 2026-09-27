@@ -8,7 +8,7 @@ export const PRESET_SIZE = { width: 1536, height: 2048 }
 
 type Pt = [number, number]
 
-interface Style {
+export interface PresetStyle {
   sea: string
   seaDeep: string
   coastGlow: string | null
@@ -26,7 +26,7 @@ interface Style {
   format: 'image/png' | 'image/jpeg'
 }
 
-const STYLES: Record<Exclude<BaseMapPreset, 'custom'>, Style> = {
+const STYLES: Record<Exclude<BaseMapPreset, 'custom'>, PresetStyle> = {
   color: {
     sea: '#6fa6d6',
     seaDeep: '#4d86bd',
@@ -177,7 +177,7 @@ function islandPath(ctx: CanvasRenderingContext2D, w: number, h: number) {
   smoothPath(ctx, ISLAND, w, h, true)
 }
 
-function drawTexture(ctx: CanvasRenderingContext2D, w: number, h: number, style: Style, rnd: () => number) {
+function drawTexture(ctx: CanvasRenderingContext2D, w: number, h: number, style: PresetStyle, rnd: () => number) {
   if (style.texture === 'none') return
   ctx.save()
   islandPath(ctx, w, h)
@@ -208,7 +208,7 @@ function drawTexture(ctx: CanvasRenderingContext2D, w: number, h: number, style:
   ctx.restore()
 }
 
-function drawMountains(ctx: CanvasRenderingContext2D, w: number, h: number, style: Style, rnd: () => number) {
+function drawMountains(ctx: CanvasRenderingContext2D, w: number, h: number, style: PresetStyle, rnd: () => number) {
   const peaks: [number, number, number][] = [
     [0.42, 0.14, 0.13],
     [0.29, 0.44, 0.09],
@@ -250,7 +250,7 @@ function drawMountains(ctx: CanvasRenderingContext2D, w: number, h: number, styl
   ctx.restore()
 }
 
-function drawRoads(ctx: CanvasRenderingContext2D, w: number, h: number, style: Style, rnd: () => number) {
+function drawRoads(ctx: CanvasRenderingContext2D, w: number, h: number, style: PresetStyle, rnd: () => number) {
   ctx.save()
   islandPath(ctx, w, h)
   ctx.clip()
@@ -436,6 +436,9 @@ function render(preset: Exclude<BaseMapPreset, 'custom'>, transparentSea: boolea
 
   return canvas.toDataURL(transparentSea ? 'image/png' : style.format, 0.9)
 }
+
+/** Colors of a preset's stylized map, reused to draw extra islands in the same look. */
+export const presetStyle = (preset: MapPresetId): PresetStyle => STYLES[preset]
 
 /** Sea color of each procedural preset; used as the document background so the look is unchanged. */
 export const PRESET_SEA: Record<Exclude<BaseMapPreset, 'custom'>, string> = {

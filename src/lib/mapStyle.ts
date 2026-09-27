@@ -139,8 +139,16 @@ export interface StyledBase {
 /**
  * Pre-composes the base texture with all style settings. Runs once per style
  * change and is shared by the editor (Konva) and the exporter (2D canvas).
+ *
+ * @param docWidth, docHeight Size of the map in document pixels; callers draw
+ *   the results at this size.
+ * @param maxSide Caps the longest side of the produced canvases (the editor keeps
+ *   them within GPU texture limits); the pictures are then drawn scaled up.
  */
-export function composeBaseMap(img: CanvasImageSource, width: number, height: number, s: BaseMapStyle): StyledBase {
+export function composeBaseMap(img: CanvasImageSource, docWidth: number, docHeight: number, s: BaseMapStyle, maxSide = Infinity): StyledBase {
+  const k = Math.min(1, maxSide / Math.max(docWidth, docHeight))
+  const width = Math.max(1, Math.round(docWidth * k))
+  const height = Math.max(1, Math.round(docHeight * k))
   const mask = makeCanvas(width, height)
   const mctx = mask.getContext('2d')!
   mctx.drawImage(img, 0, 0, width, height)

@@ -1,36 +1,20 @@
-import { OverlayFxCanvas } from './OverlayFxCanvas'
+import { useRadarSource } from '@/lib/radarSource'
 import type { OverlayFx } from '@/types'
+import { RadarFxPreview } from './RadarFxPreview'
 
-export function OverlayFxPreview({
-  fx,
-  x,
-  y,
-  width,
-  height,
-  map,
-}: {
-  fx: OverlayFx
-  x: number
-  y: number
-  width: number
-  height: number
-  map?: CanvasImageSource | null
-}) {
-  if (!fx.ids.length || width <= 0 || height <= 0) return null
+/** Floating in-game preview of the radar overlay, where the radar sits on screen. */
+export function OverlayFxPreview({ fx }: { fx: OverlayFx }) {
+  const source = useRadarSource()
+  if (!fx.ids.length) return null
   return (
-    <>
-      <OverlayFxCanvas
-        fx={fx}
-        pixelCap={1600}
-        className="pointer-events-none absolute z-[6] rounded-[6px]"
-        style={{ left: x, top: y, width, height }}
-      />
-      <div className="pointer-events-none absolute bottom-4 left-4 z-20 w-[168px]">
-        <p className="mb-1 text-[10px] font-semibold tracking-wider text-ink-400 uppercase">NUI live preview</p>
-        <div className="overflow-hidden rounded-md border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.55)]">
-          <OverlayFxCanvas fx={fx} backdrop={map ?? 'mini'} className="block aspect-[3/4] w-full bg-ink-950" />
-        </div>
+    <div className="pointer-events-none absolute bottom-4 left-4 z-20 hidden w-[340px] md:block">
+      <p className="mb-1 flex items-center justify-between text-[10px] font-semibold tracking-wider text-ink-400 uppercase">
+        <span>In-game preview</span>
+        <span className="font-mono tracking-normal text-ink-500 normal-case">1080p · /minimapoverlay</span>
+      </p>
+      <div className="overflow-hidden rounded-lg border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.55)]">
+        <RadarFxPreview fx={fx} source={source} variant="hud" className="block aspect-[11/8] w-full bg-ink-950" />
       </div>
-    </>
+    </div>
   )
 }

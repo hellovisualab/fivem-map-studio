@@ -226,6 +226,7 @@ export interface MapDocument {
   version: 1
   baseMap: BaseMap
   elements: MapElement[]
+  /** GTA world bounds covered by the base texture (the vanilla minimap_sea grid by default). */
   world: WorldBounds
   grid: {
     enabled: boolean
@@ -235,6 +236,11 @@ export interface MapDocument {
   background: string
   /** Animated NUI overlay effects. Omitted on older projects. */
   overlayFx?: OverlayFx
+  /**
+   * Adds the Cayo Perico island south-east of Los Santos: the canvas grows past the
+   * texture to fit it and the export loads the island in-game. Omitted on older projects.
+   */
+  cayoPerico?: boolean
 }
 
 export type PlanId = 'free' | 'supporter'
@@ -256,6 +262,8 @@ export interface ProjectSummary {
   updatedAt: string
   thumbnail?: string
   preset: BaseMapPreset
+  /** The project includes the Cayo Perico island. */
+  cayoPerico?: boolean
   elementCount: number
   sizeBytes: number
 }

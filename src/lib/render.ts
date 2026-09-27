@@ -2,7 +2,8 @@ import type { MapDocument, MapElement, TextElement } from '@/types'
 import { getPresetMap, getResolvedPreset, resolvePresetSource } from './basemaps'
 import { MARKER_PATHS } from './icons'
 import { loadDocumentFonts } from './fonts'
-import { composeBaseMap, drawStyledBase, effectsOf, isClipped, styleOf, toComposite } from './mapStyle'
+import { composeBaseMap, drawStyledBase, effectsOf, isClipped, styleOf, toComposite, type StyledBase } from './mapStyle'
+import { frameSource, mapFrame } from './mapFrame'
 import { loadImage, rgba } from './utils'
 
 /**
@@ -196,24 +197,12 @@ function drawElement(ctx: CanvasRenderingContext2D, el: MapElement, images: Map<
 export interface RenderOptions {
   /** Output scale relative to the document's native size. */
   scale?: number
-  /** Skip the base map (renders only elements on a transparent canvas). */
-  overlayOnly?: boolean
   /** Explicit max width; overrides scale. */
   maxWidth?: number
 }
 
-/** Rasterizes the whole document with the 2D canvas API. */
-export async function renderDocument(doc: MapDocument, opts: RenderOptions = {}): Promise<HTMLCanvasElement> {
-  const { width, height } = doc.baseMap
-  let scale = opts.scale ?? 1
-  if (opts.maxWidth) scale = Math.min(1, opts.maxWidth / width)
-
-  const canvas = document.createElement('canvas')
-  canvas.width = Math.max(1, Math.round(width * scale))
-  canvas.height = Math.max(1, Math.round(height * scale))
-  const ctx = canvas.getContext('2d')!
-  ctx.scale(scale, scale)
-
+/** Loads every picture the elements reference (image layers, custom marker icons). */
+async function loadElementImages(doc: MapDocument) {
   const srcs = new Set<string>()
   for (const el of doc.elements) {
     if (el.type === 'image') srcs.add(el.src)
@@ -229,32 +218,88 @@ export async function renderDocument(doc: MapDocument, opts: RenderOptions = {})
       }
     }),
   )
+  return images
+}
 
+/**
+ * Renders part of the document (`region` in document pixels) at `outW × outH`,
+ * reusing an already composed base (the editor's), e.g. for the radar preview.
+ * Areas outside the map get the sea color.
+ */
+export async function renderRegion(
+  doc: MapDocument,
+  styled: StyledBase | null,
+  region: { x: number; y: number; width: number; height: number },
+  outW: number,
+  outH: number,
+): Promise<HTMLCanvasElement> {
+  const images = await loadElementImages(doc)
+  await loadDocumentFonts(doc)
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(outW))
+  canvas.height = Math.max(1, Math.round(outH))
+  const ctx = canvas.getContext('2d')!
+  const sx = canvas.width / region.width
+  const sy = canvas.height / region.height
+  const pixelScale = (sx + sy) / 2
+  const { width, height } = mapFrame(doc)
+  ctx.setTransform(sx, 0, 0, sy, -region.x * sx, -region.y * sy)
+  const clipped = doc.elements.filter(isClipped)
+  if (styled) {
+    drawStyledBase(ctx, styled, width, height, doc.background, (c) => {
+      for (const el of clipped) drawElement(c, el, images, pixelScale)
+    })
+  } else {
+    for (const el of clipped) drawElement(ctx, el, images, pixelScale)
+  }
+  for (const el of doc.elements) if (!isClipped(el)) drawElement(ctx, el, images, pixelScale)
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.globalCompositeOperation = 'destination-over'
+  ctx.fillStyle = doc.background === 'transparent' ? '#1d2b36' : doc.background
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.globalCompositeOperation = 'source-over'
+  return canvas
+}
+
+/** Rasterizes the whole document (base texture plus enabled islands) with the 2D canvas API. */
+export async function renderDocument(doc: MapDocument, opts: RenderOptions = {}): Promise<HTMLCanvasElement> {
+  const { width, height } = mapFrame(doc)
+  let scale = opts.scale ?? 1
+  if (opts.maxWidth) scale = Math.min(1, opts.maxWidth / width)
+
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(width * scale))
+  canvas.height = Math.max(1, Math.round(height * scale))
+  const ctx = canvas.getContext('2d')!
+  ctx.scale(scale, scale)
+
+  const images = await loadElementImages(doc)
   await loadDocumentFonts(doc)
 
   const clipped = doc.elements.filter(isClipped)
   const free = doc.elements.filter((e) => !isClipped(e))
 
-  if (!opts.overlayOnly) {
-    let base: HTMLImageElement | null = null
-    const baseSrc = await ensureBaseSrc(doc)
-    if (baseSrc) {
-      try {
-        base = await cachedImage(baseSrc)
-      } catch {
-        /* keep background */
-      }
+  let base: HTMLImageElement | null = null
+  const baseSrc = await ensureBaseSrc(doc)
+  if (baseSrc) {
+    try {
+      base = await cachedImage(baseSrc)
+    } catch {
+      /* keep background */
     }
-    if (base) {
-      const styled = composeBaseMap(base, width, height, styleOf(doc.baseMap))
-      drawStyledBase(ctx, styled, width, height, doc.background, (c) => {
-        for (const el of clipped) drawElement(c, el, images, scale)
-      })
-    } else if (doc.background !== 'transparent') {
+  }
+  if (base) {
+    // Compose at the output resolution: thumbnails stay cheap, exports stay sharp.
+    const maxSide = Math.max(canvas.width, canvas.height)
+    const styled = composeBaseMap(frameSource(base, doc, maxSide), width, height, styleOf(doc.baseMap), maxSide)
+    drawStyledBase(ctx, styled, width, height, doc.background, (c) => {
+      for (const el of clipped) drawElement(c, el, images, scale)
+    })
+  } else {
+    if (doc.background !== 'transparent') {
       ctx.fillStyle = doc.background
       ctx.fillRect(0, 0, width, height)
     }
-  } else {
     // Without the base texture there is nothing to clip against; draw them plainly.
     for (const el of clipped) drawElement(ctx, el, images, scale)
   }

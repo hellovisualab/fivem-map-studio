@@ -8,10 +8,11 @@ import type {
   MarkerElement,
   MarkerIcon,
   TextElement,
+  WorldBounds,
   ZoneElement,
   ZoneType,
 } from '@/types'
-import { DEFAULT_WORLD, MARKER_ICONS, ZONE_TYPES } from './constants'
+import { DEFAULT_WORLD, LEGACY_DEFAULT_WORLD, MARKER_ICONS, ZONE_TYPES } from './constants'
 import { PRESET_SEA, PRESET_SIZE } from './basemaps'
 import { DEFAULT_OVERLAY_FX } from './overlayFx'
 import { uid } from './utils'
@@ -109,8 +110,13 @@ export function createMarker(x: number, y: number, icon: MarkerIcon = 'custom'):
  * @param source For `custom` the uploaded image; for presets, the dimensions of
  *   the real texture found under /maps/ (`real: true`, src stays empty and is
  *   resolved again on load). Omit for the procedural fallback.
+ * @param opts.cayoPerico Adds the Cayo Perico island to the canvas and the export.
  */
-export function createDocument(preset: BaseMapPreset, source?: { src: string; width: number; height: number; real?: boolean }): MapDocument {
+export function createDocument(
+  preset: BaseMapPreset,
+  source?: { src: string; width: number; height: number; real?: boolean },
+  opts: { cayoPerico?: boolean } = {},
+): MapDocument {
   const procedural = preset !== 'custom' && !source?.src && !source?.real
   return {
     version: 1,
@@ -129,7 +135,20 @@ export function createDocument(preset: BaseMapPreset, source?: { src: string; wi
     // Procedural presets have a transparent sea; paint it via the background instead.
     background: procedural ? PRESET_SEA[preset as MapPresetId] : '#0a0a0c',
     overlayFx: { ...DEFAULT_OVERLAY_FX },
+    cayoPerico: !!opts.cayoPerico,
   }
+}
+
+const sameBounds = (a: WorldBounds, b: WorldBounds) => a.minX === b.minX && a.maxX === b.maxX && a.minY === b.minY && a.maxY === b.maxY
+
+/**
+ * Upgrades documents saved by older versions. Projects that still carry the old,
+ * approximate default world bounds get the calibrated minimap_sea grid, so zones
+ * and blips export where they were drawn on the texture.
+ */
+export function normalizeDocument(doc: MapDocument): MapDocument {
+  if (doc.world && sameBounds(doc.world, LEGACY_DEFAULT_WORLD)) return { ...doc, world: { ...DEFAULT_WORLD } }
+  return doc
 }
 
 export function cloneElement(el: MapElement, dx = 24, dy = 24): MapElement {

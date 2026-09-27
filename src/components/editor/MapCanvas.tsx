@@ -9,12 +9,14 @@ import { canvasApi } from '@/lib/canvasApi'
 import { MAX_ZOOM, MIN_ZOOM } from '@/lib/constants'
 import { createImage, createLine, createMarker, createRectZone, createText, createZone } from '@/lib/elements'
 import { isClipped } from '@/lib/mapStyle'
+import { mapFrame } from '@/lib/mapFrame'
 import { useStyledBase } from '@/hooks/useStyledBase'
 import { useBaseSrc } from '@/hooks/useBaseSrc'
+import { useRadarPreviewSource } from '@/hooks/useRadarPreviewSource'
 import { getData } from '@/lib/data'
 import { clamp, loadImage, readFileAsDataURL } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
-import type { BaseMap, MapElement } from '@/types'
+import type { MapElement } from '@/types'
 import { overlayFxOf } from '@/lib/overlayFx'
 import { ElementNode, type NodeHandlers } from './nodes'
 import { OverlayFxPreview } from './OverlayFxPreview'
@@ -22,8 +24,6 @@ import { OverlayFxPreview } from './OverlayFxPreview'
 type Draft =
   | { kind: 'rect'; x0: number; y0: number; x1: number; y1: number }
   | { kind: 'poly'; points: number[]; cursor: { x: number; y: number } | null }
-
-const EMPTY_BASE: BaseMap = { preset: 'custom', src: '', width: 1, height: 1, tint: '#000000', tintOpacity: 0, brightness: 1 }
 
 const applyColor = (el: MapElement, color: string): Partial<MapElement> => {
   switch (el.type) {
@@ -82,7 +82,9 @@ export function MapCanvas() {
 
   const baseSrc = useBaseSrc(doc)
   const [baseImg] = useImage(baseSrc, 'anonymous')
-  const styled = useStyledBase(baseImg, doc?.baseMap ?? EMPTY_BASE)
+  const styled = useStyledBase(baseImg, doc)
+  const overlayFx = useMemo(() => overlayFxOf(doc), [doc])
+  useRadarPreviewSource(doc, styled, selectedIds, overlayFx.ids.length > 0)
   const clippedElements = useMemo(() => doc?.elements.filter(isClipped) ?? [], [doc?.elements])
   const freeElements = useMemo(() => doc?.elements.filter((e) => !isClipped(e)) ?? [], [doc?.elements])
 
@@ -98,17 +100,26 @@ export function MapCanvas() {
     return () => ro.disconnect()
   }, [])
 
+  const fitRect = useCallback(
+    (r: { x: number; y: number; width: number; height: number }) => {
+      if (!size.w || !size.h || r.width <= 0 || r.height <= 0) return
+      const pad = 40
+      const scale = clamp(Math.min((size.w - pad) / r.width, (size.h - pad) / r.height), MIN_ZOOM, MAX_ZOOM)
+      setViewport({
+        scale,
+        x: (size.w - r.width * scale) / 2 - r.x * scale,
+        y: (size.h - r.height * scale) / 2 - r.y * scale,
+      })
+    },
+    [size.w, size.h, setViewport],
+  )
+
   const fit = useCallback(() => {
     const d = useEditor.getState().doc
-    if (!d || !size.w || !size.h) return
-    const pad = 40
-    const scale = clamp(Math.min((size.w - pad) / d.baseMap.width, (size.h - pad) / d.baseMap.height), MIN_ZOOM, MAX_ZOOM)
-    setViewport({
-      scale,
-      x: (size.w - d.baseMap.width * scale) / 2,
-      y: (size.h - d.baseMap.height * scale) / 2,
-    })
-  }, [size.w, size.h, setViewport])
+    if (!d) return
+    const frame = mapFrame(d)
+    fitRect({ x: 0, y: 0, width: frame.width, height: frame.height })
+  }, [fitRect])
 
   useEffect(() => {
     if (!projectId || !size.w || fittedFor.current === projectId) return
@@ -177,6 +188,7 @@ export function MapCanvas() {
 
   useEffect(() => {
     canvasApi.fit = fit
+    canvasApi.fitRect = fitRect
     canvasApi.zoomBy = (f) => zoomAt(f)
     canvasApi.zoomTo = (s) => {
       const vp = useEditor.getState().viewport
@@ -190,7 +202,7 @@ export function MapCanvas() {
       const vp = useEditor.getState().viewport
       setViewport({ x: size.w / 2 - x * vp.scale, y: size.h / 2 - y * vp.scale })
     }
-  }, [fit, zoomAt, addImageFiles, finishDraft, setDraft, setViewport, size.w, size.h])
+  }, [fit, fitRect, zoomAt, addImageFiles, finishDraft, setDraft, setViewport, size.w, size.h])
 
   // Space bar = temporary hand tool
   useEffect(() => {
@@ -490,7 +502,8 @@ export function MapCanvas() {
 
   if (!doc) return <div ref={containerRef} className="h-full w-full" />
 
-  const { width: mapW, height: mapH } = doc.baseMap
+  // The canvas covers the base texture plus enabled islands (Cayo Perico).
+  const { width: mapW, height: mapH } = mapFrame(doc)
   const cursor = panning ? 'grab' : tool === 'select' ? 'default' : tool === 'color' ? 'cell' : 'crosshair'
   const singleSelected = selectedIds.length === 1 ? doc.elements.find((e) => e.id === selectedIds[0]) : undefined
   const keepRatio = singleSelected ? singleSelected.type === 'text' || singleSelected.type === 'marker' : false
@@ -549,7 +562,7 @@ export function MapCanvas() {
                 {styled.glow && <KImage image={styled.glow} x={0} y={0} width={mapW} height={mapH} globalCompositeOperation="destination-over" listening={false} />}
               </>
             ) : (
-              baseImg && <KImage image={baseImg} x={0} y={0} width={mapW} height={mapH} listening={false} />
+              baseImg && <KImage image={baseImg} x={0} y={0} width={doc.baseMap.width} height={doc.baseMap.height} listening={false} />
             )}
             <Rect
               x={0}
@@ -660,16 +673,7 @@ export function MapCanvas() {
           </Layer>
         </Stage>
       )}
-      {size.w > 0 && (
-        <OverlayFxPreview
-          fx={overlayFxOf(doc)}
-          x={viewport.x}
-          y={viewport.y}
-          width={mapW * viewport.scale}
-          height={mapH * viewport.scale}
-          map={styled?.island}
-        />
-      )}
+      <OverlayFxPreview fx={overlayFx} />
 
       {editingText && (
         <textarea

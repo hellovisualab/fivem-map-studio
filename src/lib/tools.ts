@@ -21,7 +21,7 @@ export const TOOLS: ToolDef[] = [
     id: 'minimap',
     name: 'Minimap Live Editor',
     description:
-      'Design your GTA V minimap live in the browser. Add gang zones, labels, images and custom tints, then export a drop-in FiveM resource in one click.',
+      'Design your GTA V minimap live in the browser, Cayo Perico included. Add gang zones, labels, images and custom tints, then export a drop-in FiveM resource in one click.',
     href: '/dashboard',
     icon: Map,
     section: 'creation',

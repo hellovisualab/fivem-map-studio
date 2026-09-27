@@ -3,8 +3,9 @@ import { Sparkles } from 'lucide-react'
 import { useEditor } from '@/store/useEditor'
 import { OVERLAY_FX, overlayFxOf, overlayFxUsesColor, toggleOverlayFx } from '@/lib/overlayFx'
 import { cn } from '@/lib/utils'
+import { useRadarSource } from '@/lib/radarSource'
 import type { OverlayFx } from '@/types'
-import { OverlayFxCanvas } from './OverlayFxCanvas'
+import { RadarFxPreview } from './RadarFxPreview'
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -26,6 +27,7 @@ export function OverlayFxSection() {
   const setFx = (patch: Partial<OverlayFx>) => updateDocument({ overlayFx: { ...fx, ...patch } })
   const colorActive = overlayFxUsesColor(fx.ids)
   const preview = fx.ids.length ? fx : { ...fx, intensity: 0.8, speed: 1.15 }
+  const source = useRadarSource()
 
   return (
     <div className="border-b border-ink-700/60 px-3 py-3 last:border-b-0">
@@ -41,11 +43,12 @@ export function OverlayFxSection() {
       </div>
       <div className="space-y-2.5">
         <p className="text-[11px] text-ink-500">
-          Live looping effects for the NUI overlay (<span className="font-mono text-ink-400">/minimapoverlay</span>). Each tile is already animating — turn one on to play it on the map.
+          Animated effects the exported NUI page draws right over the in-game radar (players toggle them with{' '}
+          <span className="font-mono text-ink-400">/minimapoverlay</span>). The previews show your map around the selected element.
         </p>
         {fx.ids.length > 0 && (
-          <div className="overflow-hidden rounded-xl border border-brand-500/30">
-            <OverlayFxCanvas fx={preview} backdrop="mini" className="block h-16 w-full" />
+          <div className="overflow-hidden rounded-xl border border-brand-500/30 md:hidden">
+            <RadarFxPreview fx={fx} source={source} variant="hud" className="block aspect-[11/8] w-full bg-ink-950" />
           </div>
         )}
         <div className="grid grid-cols-2 gap-1.5">
@@ -63,8 +66,8 @@ export function OverlayFxSection() {
                   on ? 'border-brand-500/50 bg-brand-500/10' : 'border-ink-700 bg-ink-900/40 hover:border-ink-500',
                 )}
               >
-                <div className="mb-1.5 overflow-hidden rounded-md">
-                  <OverlayFxCanvas fx={preview} ids={[item.id]} backdrop="mini" className="block h-10 w-full" />
+                <div className="mb-1.5 overflow-hidden rounded-md bg-ink-950">
+                  <RadarFxPreview fx={preview} ids={[item.id]} source={source} fps={30} className="block h-16 w-full" />
                 </div>
                 <span className="block text-[11px] font-medium text-ink-100">{item.label}</span>
                 <span className="block text-[10px] leading-snug text-ink-500">{item.blurb}</span>

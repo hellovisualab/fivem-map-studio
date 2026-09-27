@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowLeft, Check, FileImage, Loader2, Upload, X } from 'lucide-react'
@@ -7,7 +7,8 @@ import { GlassBlobs } from '@/components/layout/GlassBlobs'
 import { Button } from '@/components/ui/Button'
 import { toast } from '@/components/ui/Toast'
 import { MAP_FOLDERS, MAP_PRESET_IDS, PRESETS } from '@/lib/constants'
-import { hasMapsManifest, resolvePresetSource, type PresetSource } from '@/lib/basemaps'
+import { hasMapsManifest, presetStyle, resolvePresetSource, type PresetSource } from '@/lib/basemaps'
+import { CAYO_PERICO, cayoPreview } from '@/lib/cayo'
 import { createDocument } from '@/lib/elements'
 import { importMinimapFiles, type ImportResult } from '@/lib/importer'
 import { getData } from '@/lib/data'
@@ -72,7 +73,9 @@ export function NewProject({ importMode = false }: { importMode?: boolean }) {
   const [importing, setImporting] = useState(false)
   const [creating, setCreating] = useState(false)
   const [dragOver, setDragOver] = useState(false)
+  const [cayo, setCayo] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  const cayoThumb = useMemo(() => cayoPreview(presetStyle(preset === 'custom' ? 'color' : preset)), [preset])
 
   useEffect(() => {
     let alive = true
@@ -136,6 +139,7 @@ export function NewProject({ importMode = false }: { importMode?: boolean }) {
                   real: true,
                 }
               : undefined,
+          { cayoPerico: cayo },
         ),
       }
       const data = getData()
@@ -146,7 +150,7 @@ export function NewProject({ importMode = false }: { importMode?: boolean }) {
         projectName: project.name,
         action: preset === 'custom' ? 'imported' : 'created',
         at: now,
-        detail: PRESETS.find((p) => p.id === preset)?.name,
+        detail: `${PRESETS.find((p) => p.id === preset)?.name}${cayo ? ` + ${CAYO_PERICO.name}` : ''}`,
         ownerId: user.id,
       } as HistoryEntry)
       navigate(`/editor/${project.id}`)
@@ -249,6 +253,32 @@ export function NewProject({ importMode = false }: { importMode?: boolean }) {
                 </div>
               </div>
 
+              <div>
+                <span className="label">Islands</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={cayo}
+                  onClick={() => setCayo((v) => !v)}
+                  className={cn('panel flex w-full items-center gap-4 p-3 text-left transition', cayo ? 'border-brand-500 shadow-glow' : 'hover:border-ink-500')}
+                >
+                  <img src={cayoThumb} alt="" className="h-16 w-16 shrink-0 rounded-lg object-cover" />
+                  <div className="min-w-0 flex-1">
+                    <p className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+                      Include {CAYO_PERICO.name}
+                      <span className="border-brand-500/40 bg-brand-500/10 text-brand-300 rounded-md border px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase">New</span>
+                    </p>
+                    <p className="text-ink-400 mt-1 text-xs">
+                      Adds the heist island south-east of Los Santos. Zones and blips on it export with real coordinates, and the resource loads the island
+                      in-game (game build {CAYO_PERICO.minGameBuild}+).
+                    </p>
+                  </div>
+                  <span className={cn('relative h-5 w-9 shrink-0 rounded-full transition', cayo ? 'bg-brand-500' : 'bg-ink-600')}>
+                    <span className={cn('absolute top-0.5 h-4 w-4 rounded-full bg-white transition', cayo ? 'left-4.5' : 'left-0.5')} />
+                  </span>
+                </button>
+              </div>
+
               {/* Dropzone */}
               <div>
                 <span className="label">Or import your own minimap</span>
@@ -337,7 +367,10 @@ export function NewProject({ importMode = false }: { importMode?: boolean }) {
                   </AnimatePresence>
                   <div className="from-ink-950/90 absolute inset-x-0 bottom-0 bg-gradient-to-t to-transparent p-4">
                     <p className="text-ink-400 text-xs">Preview</p>
-                    <p className="font-semibold">{PRESETS.find((p) => p.id === preset)?.name}</p>
+                    <p className="font-semibold">
+                      {PRESETS.find((p) => p.id === preset)?.name}
+                      {cayo && <span className="text-brand-300"> + {CAYO_PERICO.name}</span>}
+                    </p>
                   </div>
                 </div>
                 <div className="p-4">
