@@ -1,19 +1,30 @@
 import { useEffect, useRef, type CSSProperties } from 'react'
-import { paintRadarFx } from '@/lib/overlayRuntime'
+import { paintRadarFx, type RadarSurface } from '@/lib/overlayRuntime'
 import { onFrame } from '@/lib/fxTicker'
-import { drawHudBackdrop, drawRadar, genericRadarSource, hudLayout, previewHeading, tileRadarRect, type RadarSource } from '@/lib/radarScene'
+import {
+  BIGMAP_VIEW_WORLD,
+  drawHudBackdrop,
+  drawPauseScreen,
+  drawRadar,
+  genericRadarSource,
+  hudLayout,
+  previewHeading,
+  tileRadarRect,
+  type RadarSource,
+} from '@/lib/radarScene'
 import type { OverlayFx, OverlayFxId } from '@/types'
 
 /**
- * Animated radar with the overlay effects painted by the same runtime the
- * exported NUI page uses. `hud` shows the bottom-left corner of the game screen,
- * `tile` just the radar.
+ * Animated in-game map with the overlay effects painted by the same runtime the
+ * exported NUI page uses. `hud` shows the game screen around `surface` (radar,
+ * expanded radar or pause menu map); `tile` just a radar.
  */
 export function RadarFxPreview({
   fx,
   ids,
   source,
   variant = 'tile',
+  surface = 'radar',
   fps = 60,
   className,
   style,
@@ -23,14 +34,15 @@ export function RadarFxPreview({
   ids?: OverlayFxId[]
   source?: RadarSource | null
   variant?: 'hud' | 'tile'
+  surface?: RadarSurface
   fps?: number
   className?: string
   style?: CSSProperties
 }) {
   const ref = useRef<HTMLCanvasElement>(null)
-  const props = useRef({ fx, ids, source })
+  const props = useRef({ fx, ids, source, surface })
   useEffect(() => {
-    props.current = { fx, ids, source }
+    props.current = { fx, ids, source, surface }
   })
 
   useEffect(() => {
@@ -57,15 +69,24 @@ export function RadarFxPreview({
       const t = Math.max(0, (now - started) / 1000)
       ctx.setTransform(1, 0, 0, 1, 0, 0)
       ctx.clearRect(0, 0, w, h)
-      let radar
+      const src = cur.source ?? genericRadarSource()
+      const fx = { ...cur.fx, ids: cur.ids ?? cur.fx.ids }
       if (variant === 'hud') {
-        drawHudBackdrop(ctx, w, h)
-        radar = hudLayout(w, h)
+        const layout = hudLayout(w, h, cur.surface)
+        if (cur.surface === 'pause') {
+          drawPauseScreen(ctx, layout.screen, src)
+        } else {
+          drawHudBackdrop(ctx, w, h)
+          const bigmap = cur.surface === 'bigmap'
+          // Blips and bars keep their normal-radar size on the expanded radar (2.3374 vs 5.674).
+          drawRadar(ctx, layout.rect, src, previewHeading(t), bigmap ? BIGMAP_VIEW_WORLD : undefined, bigmap ? (layout.rect.h * 2.3374) / 5.674 : undefined)
+        }
+        paintRadarFx(ctx, fx, t, layout.rect, layout.unit)
       } else {
-        radar = tileRadarRect(w, h)
+        const radar = tileRadarRect(w, h)
+        drawRadar(ctx, radar, src, previewHeading(t))
+        paintRadarFx(ctx, fx, t, radar)
       }
-      drawRadar(ctx, radar, cur.source ?? genericRadarSource(), previewHeading(t))
-      paintRadarFx(ctx, { ...cur.fx, ids: cur.ids ?? cur.fx.ids }, t, radar)
     })
     return () => {
       stop()

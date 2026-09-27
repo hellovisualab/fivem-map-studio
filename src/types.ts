@@ -212,8 +212,20 @@ export type OverlayFxId =
   | 'glitch'
   | 'vignette'
 
+/** Maps the overlay effects play on in game. */
+export interface OverlayFxTargets {
+  /** The minimap / radar. */
+  radar: boolean
+  /** The expanded radar (bigmap, Z in GTA Online). */
+  bigmap: boolean
+  /** The full-screen blip map of the pause menu. */
+  pause: boolean
+}
+
 export interface OverlayFx {
   ids: OverlayFxId[]
+  /** Omitted on older projects: every surface. */
+  targets?: OverlayFxTargets
   /** 0–1 strength of the selected effects. */
   intensity: number
   /** 0.25–3 playback rate. 1 = default tempo. */

@@ -294,18 +294,23 @@ Config.DrawZoneNames = false
 ${
   opts.includeHtml
     ? `
--- Animated effects drawn over the radar by html/ (NUI). The overlay follows the radar
--- on any resolution, safe zone and aspect ratio, and hides with the pause menu, the
--- expanded map or a hidden HUD. Players toggle it with /${OVERLAY_COMMAND} (remembered).
+-- Animated effects drawn by html/ (NUI) over the in-game maps. The overlay follows them
+-- on any resolution, safe zone and aspect ratio, and hides with a hidden HUD or radar.
+-- Players toggle it with /${OVERLAY_COMMAND} (remembered).
 Config.Overlay = {
     Enabled = true,
     Command = ${luaStr(OVERLAY_COMMAND)},
+    -- Where the effects play: the minimap, the expanded radar (bigmap) and the
+    -- full-screen blip map of the pause menu.
+    Radar = ${fx.targets?.radar !== false},
+    Bigmap = ${fx.targets?.bigmap !== false},
+    PauseMap = ${fx.targets?.pause !== false},
     -- glow, radar, ripple, scanlines, pulse, heartbeat, breathe, shimmer, vignette, hue, flicker, glitch
     Effects = { ${fx.ids.map(luaStr).join(', ')} },
     Intensity = ${fx.intensity.toFixed(2)}, -- 0.0 - 1.0
     Speed = ${fx.speed.toFixed(2)}, -- 0.25 - 3.0
     Color = ${luaStr(fx.color)},
-    -- Nudge the overlay if another resource moves or resizes the radar (fractions of the screen).
+    -- Nudge the radar overlays if another resource moves or resizes the radar (fractions of the screen).
     Adjust = { x = 0.0, y = 0.0, width = 0.0, height = 0.0 }
 }
 `
@@ -472,41 +477,73 @@ const OVERLAY_COMMAND = 'minimapoverlay'
 
 /** Keeps the NUI effects canvas over the radar (see overlayNui.ts for the page side). */
 const overlayLua = `
--- Animated overlay (html/): the NUI page paints Config.Overlay.Effects over the radar.
+-- Animated overlay (html/): the NUI page paints Config.Overlay.Effects over the radar,
+-- the expanded radar and the pause menu map.
 local overlay = { ready = false, enabled = false }
 
--- Screen rectangle of the vanilla radar (0-1). Size measured by glitchdetector
--- (fivem-minimap-anchor): width = screen height / 4, height = screen height / 5.674,
--- inset by the safe zone (5% per 0.1 below 1.0). Wider than 16:9, the HUD stays
--- inside a centred 16:9 area.
-local function minimapRect()
+-- Where each map is on screen (0-1). Radar size measured by glitchdetector
+-- (fivem-minimap-anchor), expanded radar by Boost-DynamicHud: both sit in the bottom-left
+-- corner of the safe zone, inside a centred 16:9 area on wider screens. The pause map
+-- fills the screen. \`unit\` (0-1 of the screen height) keeps lines radar-sized.
+local function surfaceLayout(surface)
     local resX, resY = GetActiveScreenResolution()
     local margin = (1.0 - GetSafeZoneSize()) * 0.5
-    local hudW = math.min(resX, resY * 16.0 / 9.0)
-    local hudX = (resX - hudW) / 2.0
-    local w, h = resY / 4.0, resY / 5.674
-    local adjust = Config.Overlay.Adjust or {}
+    local unit = 1.0 / 5.674 / 100.0
+    local x, y, w, h
+    if surface == "pause" then
+        local ix = math.max(resX * margin, resY * 0.015)
+        local iy = math.max(resY * margin, resY * 0.015)
+        x, y, w, h = ix, iy, resX - ix * 2.0, resY - iy * 2.0
+        unit = unit * 1.6
+    else
+        if surface == "bigmap" then
+            w, h = resY / 2.52, resY / 2.3374
+            unit = unit * 1.6
+        else
+            w, h = resY / 4.0, resY / 5.674
+        end
+        local hudW = math.min(resX, resY * 16.0 / 9.0)
+        x = (resX - hudW) / 2.0 + hudW * margin
+        y = resY * (1.0 - margin) - h
+    end
+    local adjust = surface ~= "pause" and Config.Overlay.Adjust or {}
     return {
-        x = (hudX + hudW * margin) / resX + (adjust.x or 0.0),
-        y = (resY * (1.0 - margin) - h) / resY + (adjust.y or 0.0),
+        x = x / resX + (adjust.x or 0.0),
+        y = y / resY + (adjust.y or 0.0),
         w = w / resX + (adjust.width or 0.0),
         h = h / resY + (adjust.height or 0.0)
-    }
+    }, unit
 end
 
 local function isOn(native)
     return native ~= nil and native() == true
 end
 
--- Only while the radar itself is on screen.
-local function overlayVisible()
-    return overlay.enabled
-        and not isOn(IsPauseMenuActive)
-        and not isOn(IsRadarHidden)
-        and not isOn(IsHudHidden)
-        and not isOn(IsBigmapActive)
-        and not isOn(IsPlayerSwitchInProgress)
-        and not isOn(IsScreenFadedOut)
+-- The map is the first tab of the pause menu. Where the game reports the map page's
+-- context, the effects hide on the other tabs; otherwise they stay while it is open.
+local mapContext, mapContextSeen = GetHashKey("MAP_CanZoom"), false
+local function onPauseMap()
+    if PauseMenuIsContextActive == nil then return true end
+    if PauseMenuIsContextActive(mapContext) then
+        mapContextSeen = true
+        return true
+    end
+    return not mapContextSeen
+end
+
+-- Which map is on screen right now, or nil when the effects should not show.
+local function currentSurface()
+    if not overlay.enabled then return nil end
+    if isOn(IsPauseMenuActive) then
+        return Config.Overlay.PauseMap and onPauseMap() and "pause" or nil
+    end
+    if isOn(IsRadarHidden) or isOn(IsHudHidden) or isOn(IsPlayerSwitchInProgress) or isOn(IsScreenFadedOut) then
+        return nil
+    end
+    if isOn(IsBigmapActive) then
+        return Config.Overlay.Bigmap and "bigmap" or nil
+    end
+    return Config.Overlay.Radar and "radar" or nil
 end
 
 local function sendOverlayConfig()
@@ -539,16 +576,17 @@ CreateThread(function()
     overlay.enabled = Config.Overlay.Enabled and GetResourceKvpString("overlay") ~= "off"
     TriggerEvent("chat:addSuggestion", "/" .. Config.Overlay.Command, "Toggle the animated minimap overlay")
     while true do
-        local visible = overlayVisible()
-        local rect = visible and minimapRect() or nil
-        local key = rect and string.format("%.4f %.4f %.4f %.4f", rect.x, rect.y, rect.w, rect.h) or "hidden"
+        local surface = currentSurface()
+        local rect, unit = nil, nil
+        if surface then rect, unit = surfaceLayout(surface) end
+        local key = rect and string.format("%s %.4f %.4f %.4f %.4f", surface, rect.x, rect.y, rect.w, rect.h) or "hidden"
         -- Until the page has answered, keep re-sending: messages sent before it loads are lost.
         if key ~= lastLayout or (not overlay.ready and GetGameTimer() - lastSend > 2000) then
             if not overlay.ready then sendOverlayConfig() end
-            SendNUIMessage({ action = "fx:layout", visible = visible, rect = rect })
+            SendNUIMessage({ action = "fx:layout", visible = surface ~= nil, surface = surface, rect = rect, unit = unit })
             lastLayout, lastSend = key, GetGameTimer()
         end
-        Wait(200)
+        Wait(150)
     end
 end)
 `
@@ -608,12 +646,12 @@ are exported with real GTA coordinates and tagged \`region = "cayo_perico"\`.
 }
 ## Contents
 - \`fxmanifest.lua\` – resource manifest
-- \`client.lua\` – creates zone/marker blips${overlay ? ' and keeps the animated overlay on the radar' : ''}
+- \`client.lua\` – creates zone/marker blips${overlay ? ' and keeps the animated overlay on the in-game maps' : ''}
 - \`config/config.lua\` – all zones, markers and labels in GTA world coordinates
 - \`config/*.json\` – the same data as JSON for other tools
 - \`config/project.json\` – full studio project (re-import it in LABSEVE7 Map Studio)
 - \`stream/\` – minimap textures
-${overlay ? `- \`html/\` – animated effects drawn over the radar (\`Config.Overlay\`, toggle with /${OVERLAY_COMMAND})\n` : ''}
+${overlay ? `- \`html/\` – animated effects on the minimap, the expanded radar and the pause map (\`Config.Overlay\`, toggle with /${OVERLAY_COMMAND})\n` : ''}
 `
 
 /** Copies a rectangle (document pixels, clamped to the canvas) into a new canvas. */

@@ -3,12 +3,13 @@ import type { MapDocument, MapElement } from '@/types'
 import type { StyledBase } from '@/lib/mapStyle'
 import { absolutePoints, polygonCentroid, worldToCanvas } from '@/lib/geometry'
 import { renderRegion } from '@/lib/render'
-import { RADAR_VIEW_WORLD } from '@/lib/radarScene'
+import { PREVIEW_SOURCE_SPAN } from '@/lib/radarScene'
 import { setRadarSource } from '@/lib/radarSource'
 
 /** Legion Square, downtown Los Santos: where the preview "player" stands on an empty map. */
 const DEFAULT_SPOT = { x: 195, y: -935 }
-const SIZE = 512
+// About the base texture's own resolution over PREVIEW_SOURCE_SPAN world units.
+const SIZE = 1536
 
 function elementCenter(el: MapElement) {
   if (el.type === 'zone' || el.type === 'line') return polygonCentroid(absolutePoints(el))
@@ -40,8 +41,8 @@ export function useRadarPreviewSource(doc: MapDocument | null, styled: StyledBas
       const center = previewCenter(doc, selectedIds)
       const sx = doc.baseMap.width / (w.maxX - w.minX)
       const sy = doc.baseMap.height / (w.maxY - w.minY)
-      // Wide enough that the turning radar never shows the corners.
-      const span = RADAR_VIEW_WORLD * 1.8
+      // Wide enough for the pause map view and for the turning radars' corners.
+      const span = PREVIEW_SOURCE_SPAN
       const region = { x: center.x - (span * sx) / 2, y: center.y - (span * sy) / 2, width: span * sx, height: span * sy }
       try {
         const image = await renderRegion(doc, styled, region, SIZE, SIZE)

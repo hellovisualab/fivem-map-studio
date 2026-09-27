@@ -1,4 +1,4 @@
-import { minimapRect, type RadarRect } from './overlayRuntime'
+import { bigmapRect, minimapRect, pauseMapRect, surfaceUnit, type RadarRect, type RadarSurface } from './overlayRuntime'
 
 /**
  * Editor-only mock-up of the game HUD used to preview the radar overlay: the
@@ -10,6 +10,12 @@ export const PREVIEW_SCREEN = { width: 1920, height: 1080, safeZone: 0.94 }
 
 /** World units the preview radar shows across its width (on foot, default zoom). */
 export const RADAR_VIEW_WORLD = 800
+/** World units across the expanded radar, which zooms out further. */
+export const BIGMAP_VIEW_WORLD = 2400
+/** World units across the screen on the pause menu map when it opens. */
+export const PAUSE_VIEW_WORLD = 4200
+/** World units covered by the shared map picture; enough for every preview. */
+export const PREVIEW_SOURCE_SPAN = 4800
 
 /** Map picture around the player for the preview radar: square, north up. */
 export interface RadarSource {
@@ -69,11 +75,22 @@ export function genericRadarSource(): RadarSource {
  * Draws the radar the way the game does: the map turned with the camera, the
  * player arrow in the middle, the north blip on the edge and the health / armour
  * bars underneath.
+ *
+ * @param viewWorld World units across the radar (the expanded radar shows more).
+ * @param blipRef Height of the normal radar in canvas pixels: blips and bars keep that
+ *   size when the radar expands.
  */
-export function drawRadar(ctx: CanvasRenderingContext2D, r: RadarRect, source: RadarSource, heading: number) {
+export function drawRadar(
+  ctx: CanvasRenderingContext2D,
+  r: RadarRect,
+  source: RadarSource,
+  heading: number,
+  viewWorld = RADAR_VIEW_WORLD,
+  blipRef = r.h,
+) {
   if (r.w < 8 || r.h < 8) return
-  const bar = Math.max(2, r.h * 0.04)
-  const gap = Math.max(1, r.h * 0.02)
+  const bar = Math.max(2, blipRef * 0.04)
+  const gap = Math.max(1, blipRef * 0.02)
   const mapH = r.h - bar - gap
   const cx = r.x + r.w / 2
   const cy = r.y + mapH / 2
@@ -84,7 +101,7 @@ export function drawRadar(ctx: CanvasRenderingContext2D, r: RadarRect, source: R
   ctx.clip()
   ctx.fillStyle = '#1d2b36'
   ctx.fillRect(r.x, r.y, r.w, mapH)
-  const side = (source.worldSpan * r.w) / RADAR_VIEW_WORLD
+  const side = (source.worldSpan * r.w) / viewWorld
   ctx.translate(cx, cy)
   ctx.rotate(-heading)
   ctx.globalAlpha = 0.94
@@ -92,7 +109,8 @@ export function drawRadar(ctx: CanvasRenderingContext2D, r: RadarRect, source: R
   ctx.restore()
 
   // Player arrow: the radar turns with the camera, so it points up.
-  const s = mapH * 0.075
+  const blip = blipRef - bar - gap
+  const s = blip * 0.075
   ctx.save()
   ctx.translate(cx, cy)
   ctx.beginPath()
@@ -111,9 +129,9 @@ export function drawRadar(ctx: CanvasRenderingContext2D, r: RadarRect, source: R
   // North blip where the map's north meets the radar edge.
   const dx = -Math.sin(heading)
   const dy = -Math.cos(heading)
-  const inset = mapH * 0.1
+  const inset = blip * 0.1
   const k = Math.min((r.w / 2 - inset) / Math.max(1e-6, Math.abs(dx)), (mapH / 2 - inset) / Math.max(1e-6, Math.abs(dy)))
-  const nr = mapH * 0.065
+  const nr = blip * 0.065
   ctx.save()
   ctx.translate(cx + dx * k, cy + dy * k)
   ctx.beginPath()
@@ -140,15 +158,116 @@ export function drawRadar(ctx: CanvasRenderingContext2D, r: RadarRect, source: R
   meter(r.x + half + gap, 'rgba(26,52,70,0.9)', '#4aa3dc', 0.55)
 }
 
-/** Where the radar lands when the bottom-left corner of the HUD fills a `w × h` canvas. */
-export function hudLayout(w: number, h: number): RadarRect {
+export interface HudLayout {
+  /** The map surface the effects play on, in canvas pixels. */
+  rect: RadarRect
+  /** Pixels per effect unit (undefined: 1% of the rect height). */
+  unit: number | undefined
+  /** The whole virtual screen, in canvas pixels. */
+  screen: RadarRect
+}
+
+/**
+ * Lays a surface out on a `w × h` canvas: the bottom-left corner of the HUD for the
+ * radar and the expanded radar, the whole screen for the pause map.
+ */
+export function hudLayout(w: number, h: number, surface: RadarSurface = 'radar'): HudLayout {
   const S = PREVIEW_SCREEN
-  const radar = minimapRect(S.width, S.height, S.safeZone)
-  const top = radar.y - radar.h * 0.7
-  const view = { x: 0, y: top, w: radar.x + radar.w + radar.h * 0.85, h: S.height - top }
+  let rect: RadarRect
+  let view: RadarRect
+  if (surface === 'pause') {
+    rect = pauseMapRect(S.width, S.height, S.safeZone)
+    view = { x: 0, y: 0, w: S.width, h: S.height }
+  } else if (surface === 'bigmap') {
+    rect = bigmapRect(S.width, S.height, S.safeZone)
+    const top = rect.y - rect.h * 0.16
+    view = { x: 0, y: top, w: (S.height - top) * 1.375, h: S.height - top }
+  } else {
+    rect = minimapRect(S.width, S.height, S.safeZone)
+    const top = rect.y - rect.h * 0.7
+    view = { x: 0, y: top, w: rect.x + rect.w + rect.h * 0.85, h: S.height - top }
+  }
   const k = Math.min(w / view.w, h / view.h)
-  const oy = h - view.h * k
-  return { x: (radar.x - view.x) * k, y: oy + (radar.y - view.y) * k, w: radar.w * k, h: radar.h * k }
+  const ox = surface === 'pause' ? (w - view.w * k) / 2 : 0
+  const oy = surface === 'pause' ? (h - view.h * k) / 2 : h - view.h * k
+  const map = (r: RadarRect) => ({ x: ox + (r.x - view.x) * k, y: oy + (r.y - view.y) * k, w: r.w * k, h: r.h * k })
+  return {
+    rect: map(rect),
+    unit: surface === 'radar' ? undefined : surfaceUnit(surface, S.height) * k,
+    screen: map({ x: 0, y: 0, w: S.width, h: S.height }),
+  }
+}
+
+/**
+ * The pause menu with its map tab open: the map north up around the player, the
+ * header with the tabs and the instructional buttons.
+ */
+export function drawPauseScreen(ctx: CanvasRenderingContext2D, screen: RadarRect, source: RadarSource) {
+  const { x, y, w, h } = screen
+  if (w < 16 || h < 9) return
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(x, y, w, h)
+  ctx.clip()
+  ctx.fillStyle = '#1d2b36'
+  ctx.fillRect(x, y, w, h)
+  const side = (source.worldSpan * w) / PAUSE_VIEW_WORLD
+  ctx.drawImage(source.image, x + w / 2 - side / 2, y + h / 2 - side / 2, side, side)
+  ctx.fillStyle = 'rgba(0,0,0,0.12)'
+  ctx.fillRect(x, y, w, h)
+
+  // Player blip at the centre, facing north-east.
+  const s = h * 0.022
+  ctx.save()
+  ctx.translate(x + w / 2, y + h / 2)
+  ctx.rotate(0.6)
+  ctx.beginPath()
+  ctx.moveTo(0, -s)
+  ctx.lineTo(s * 0.7, s * 0.78)
+  ctx.lineTo(0, s * 0.38)
+  ctx.lineTo(-s * 0.7, s * 0.78)
+  ctx.closePath()
+  ctx.fillStyle = '#f4f4f4'
+  ctx.fill()
+  ctx.lineWidth = Math.max(1, s * 0.14)
+  ctx.strokeStyle = 'rgba(0,0,0,0.6)'
+  ctx.stroke()
+  ctx.restore()
+
+  // Header: tabs over a dark band, the map tab selected.
+  const band = ctx.createLinearGradient(0, y, 0, y + h * 0.16)
+  band.addColorStop(0, 'rgba(0,0,0,0.85)')
+  band.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = band
+  ctx.fillRect(x, y, w, h * 0.16)
+  const font = Math.max(5, h * 0.024)
+  ctx.font = `600 ${font}px Arial, sans-serif`
+  ctx.textBaseline = 'middle'
+  let tx = x + w * 0.1
+  const ty = y + h * 0.07
+  for (const [i, tab] of ['MAP', 'BRIEF', 'STATS', 'SETTINGS', 'GALLERY'].entries()) {
+    const tw = ctx.measureText(tab).width
+    ctx.fillStyle = i === 0 ? '#ffffff' : 'rgba(255,255,255,0.55)'
+    ctx.fillText(tab, tx, ty)
+    if (i === 0) ctx.fillRect(tx, ty + font * 0.75, tw, Math.max(1, font * 0.14))
+    tx += tw + font * 1.6
+  }
+
+  // Instructional buttons, bottom right.
+  const small = Math.max(4, h * 0.017)
+  ctx.font = `${small}px Arial, sans-serif`
+  let bx = x + w * 0.93
+  const by = y + h * 0.93
+  for (const label of ['Back', 'Waypoint', 'Zoom']) {
+    const bw = ctx.measureText(label).width + small * 2.2
+    bx -= bw
+    ctx.fillStyle = 'rgba(0,0,0,0.6)'
+    ctx.fillRect(bx, by - small, bw - small * 0.4, small * 2)
+    ctx.fillStyle = '#e8e8e8'
+    ctx.fillText(label, bx + small * 0.9, by)
+    bx -= small * 0.4
+  }
+  ctx.restore()
 }
 
 /** A radar centred in a `w × h` canvas with room around it for glows (effect tiles). */
