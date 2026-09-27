@@ -9,6 +9,7 @@ A visual minimap editor for FiveM (GTA V) servers. Design custom minimaps in the
 - **Landing page** with hero, feature grid and Free / Supporter plan cards
 - **Auth & dashboard** – register / login, saved projects with thumbnails, activity history, plan & storage usage
 - **Project creator** – name your project, choose a base map preset (GTA V Color, Original, Satellite, Real Map) or upload your own
+- **Cayo Perico** – optionally add the heist island south-east of Los Santos (on project creation or later under *Map settings → Islands*). The canvas grows to include a stylized island in your map's colors; zones, markers and labels drawn on it export with real GTA coordinates, and the resource streams the island in-game (game build 2189+)
 - **Canvas editor (Konva)** – zoom (wheel / pinch), pan (hand tool, space-drag, middle mouse), optional grid, live pixel + GTA world coordinates
 - **Tools** – select, move, text, image, rectangle zone, line, polygon zone, marker, paint color, undo / redo, delete
 - **Layers panel** – show/hide, lock, drag to reorder, bring forward / send backward, search
@@ -113,11 +114,18 @@ src/
 ├─ stream/
 │  ├─ minimap_full.png
 │  ├─ minimap_sea_0_0.png … minimap_sea_2_1.png
+│  ├─ cayo_perico.png    only when the project includes Cayo Perico
 │  └─ README.txt         how to pack each PNG into its minimap_sea_R_C.ytd with OpenIV
 └─ html/                 optional NUI overlay
 ```
 
 Browsers cannot write `.ytd` texture dictionaries, so the exporter ships ready-to-pack PNG tiles plus instructions.
+
+Pixel ↔ world conversion uses the vanilla minimap grid from `minimap.ymt`: six 4500-unit tiles starting at X −4140 / Y 8400, i.e. X −4140…4860 and Y −5100…8400 (editable per project under *World bounds*). Projects saved with the old approximate bounds are migrated automatically when opened.
+
+### Cayo Perico
+
+The island lies outside the `minimap_sea` grid, so the game shows it with its own island map. When a project includes Cayo Perico the export adds `Config.CayoPerico` and a client thread that, within 2000 m of the island, calls `SET_ISLAND_ENABLED("HeistIsland")` and `SET_USE_ISLAND_MAP` (the same switch GTA Online uses). The `minimap_sea` tiles contain only Los Santos; your island design goes to `stream/cayo_perico.png`, and island zones / markers become blips tagged `region = "cayo_perico"`. The server needs `sv_enforceGameBuild 2189` (or newer) in `server.cfg`.
 
 ## Notes
 

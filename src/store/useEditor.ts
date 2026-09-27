@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { MapDocument, MapElement, Project, ToolId, ZoneType, MarkerIcon } from '@/types'
 import { getData } from '@/lib/data'
-import { cloneElement } from '@/lib/elements'
+import { cloneElement, normalizeDocument } from '@/lib/elements'
 import { debounce } from '@/lib/utils'
 
 export type SaveState = 'saved' | 'saving' | 'unsaved' | 'error' | 'idle'
@@ -105,7 +105,7 @@ export const useEditor = create<EditorState>((set, get) => {
       debouncedSave.cancel()
       set({
         project,
-        doc: project.document,
+        doc: normalizeDocument(project.document),
         past: [],
         future: [],
         transaction: null,

@@ -3,6 +3,7 @@ import { getPresetMap, getResolvedPreset, resolvePresetSource } from './basemaps
 import { MARKER_PATHS } from './icons'
 import { loadDocumentFonts } from './fonts'
 import { composeBaseMap, drawStyledBase, effectsOf, isClipped, styleOf, toComposite } from './mapStyle'
+import { frameSource, mapFrame } from './mapFrame'
 import { loadImage, rgba } from './utils'
 
 /**
@@ -202,9 +203,9 @@ export interface RenderOptions {
   maxWidth?: number
 }
 
-/** Rasterizes the whole document with the 2D canvas API. */
+/** Rasterizes the whole document (base texture plus enabled islands) with the 2D canvas API. */
 export async function renderDocument(doc: MapDocument, opts: RenderOptions = {}): Promise<HTMLCanvasElement> {
-  const { width, height } = doc.baseMap
+  const { width, height } = mapFrame(doc)
   let scale = opts.scale ?? 1
   if (opts.maxWidth) scale = Math.min(1, opts.maxWidth / width)
 
@@ -246,7 +247,9 @@ export async function renderDocument(doc: MapDocument, opts: RenderOptions = {})
       }
     }
     if (base) {
-      const styled = composeBaseMap(base, width, height, styleOf(doc.baseMap))
+      // Compose at the output resolution: thumbnails stay cheap, exports stay sharp.
+      const maxSide = Math.max(canvas.width, canvas.height)
+      const styled = composeBaseMap(frameSource(base, doc, maxSide), width, height, styleOf(doc.baseMap), maxSide)
       drawStyledBase(ctx, styled, width, height, doc.background, (c) => {
         for (const el of clipped) drawElement(c, el, images, scale)
       })

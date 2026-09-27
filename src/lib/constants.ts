@@ -3,7 +3,19 @@ import { DEFAULT_STYLE } from './mapStyle'
 
 export const APP_NAME = 'LABSEVE7 Tools'
 
+/**
+ * World area covered by the vanilla minimap texture: the 2×3 minimap_sea grid of
+ * minimap.ymt (vBitmapStartX / vBitmapStartY = -4140 / 8400, 4500 units per tile).
+ */
 export const DEFAULT_WORLD: WorldBounds = {
+  minX: -4140,
+  maxX: 4860,
+  minY: -5100,
+  maxY: 8400,
+}
+
+/** Approximate bounds shipped before the minimap.ymt calibration; migrated on load. */
+export const LEGACY_DEFAULT_WORLD: WorldBounds = {
   minX: -4300,
   maxX: 4600,
   minY: -4400,

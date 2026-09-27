@@ -1,7 +1,9 @@
 import JSZip from 'jszip'
 import type { MapDocument, MapElement, Project } from '@/types'
-import { absolutePoints, canvasToWorld } from './geometry'
+import { absolutePoints, canvasToWorld, polygonCentroid } from './geometry'
 import { canvasToBlob, renderDocument } from './render'
+import { CAYO_PERICO, isInCayo } from './cayo'
+import { mapFrame, type PixelRect } from './mapFrame'
 import { overlayFxOf, overlayIndexHtml, overlayFxDriverJs } from './overlayFx'
 import overlayFxCss from './overlayFx.css?raw'
 import { hexToRgb, round, slugify } from './utils'
@@ -16,8 +18,12 @@ export interface ExportOptions {
   onProgress?: (pct: number, label: string) => void
 }
 
+/** Which island a position belongs to; only set when the project includes Cayo Perico. */
+type Region = 'los_santos' | 'cayo_perico'
+
 interface ZoneOut {
   id: string
+  region?: Region
   name: string
   type: string
   description: string
@@ -32,6 +38,7 @@ interface ZoneOut {
 
 interface MarkerOut {
   id: string
+  region?: Region
   name: string
   icon: string
   label: string
@@ -44,6 +51,7 @@ interface MarkerOut {
 
 interface LabelOut {
   id: string
+  region?: Region
   text: string
   font: string
   size: number
@@ -82,7 +90,26 @@ export function nearestBlipColour(hex: string) {
   return best
 }
 
+/** World position an element is anchored at (its centre for shapes and images). */
+function elementAnchor(el: MapElement, doc: MapDocument) {
+  if (el.type === 'zone' || el.type === 'line') {
+    const c = polygonCentroid(absolutePoints(el))
+    return canvasToWorld(c.x, c.y, doc)
+  }
+  if (el.type === 'image') return canvasToWorld(el.x + el.width / 2, el.y + el.height / 2, doc)
+  return canvasToWorld(el.x, el.y, doc)
+}
+
+/** True for elements designed on Cayo Perico (only when the project includes the island). */
+const isCayoElement = (el: MapElement, doc: MapDocument) => {
+  if (!doc.cayoPerico) return false
+  const w = elementAnchor(el, doc)
+  return isInCayo(w.x, w.y)
+}
+
 export function buildPositions(doc: MapDocument) {
+  // Same test the tile export uses, so an element is never tagged one island and drawn on the other.
+  const regionOf = (el: MapElement): Region | undefined => (doc.cayoPerico ? (isCayoElement(el, doc) ? 'cayo_perico' : 'los_santos') : undefined)
   const zones: ZoneOut[] = []
   const markers: MarkerOut[] = []
   const labels: LabelOut[] = []
@@ -101,6 +128,7 @@ export function buildPositions(doc: MapDocument) {
         const maxY = Math.max(...ys)
         zones.push({
           id: el.id,
+          region: regionOf(el),
           name: el.name,
           type: el.zoneType,
           description: el.description,
@@ -118,6 +146,7 @@ export function buildPositions(doc: MapDocument) {
         const w = canvasToWorld(el.x, el.y, doc)
         markers.push({
           id: el.id,
+          region: regionOf(el),
           name: el.name,
           icon: el.icon,
           label: el.label,
@@ -133,6 +162,7 @@ export function buildPositions(doc: MapDocument) {
         const w = canvasToWorld(el.x, el.y, doc)
         labels.push({
           id: el.id,
+          region: regionOf(el),
           text: el.text,
           font: el.fontFamily,
           size: el.fontSize,
@@ -209,7 +239,7 @@ function configLua(doc: MapDocument, data: ReturnType<typeof buildPositions>) {
   const zones = data.zones
     .map(
       (z) => `    {
-        id = ${luaStr(z.id)},
+        id = ${luaStr(z.id)},${z.region ? `\n        region = ${luaStr(z.region)},` : ''}
         name = ${luaStr(z.name)},
         type = ${luaStr(z.type)},
         description = ${luaStr(z.description)},
@@ -228,7 +258,7 @@ ${z.polygon.map((p) => `            vector2(${p.x}, ${p.y})`).join(',\n')}
   const markers = data.markers
     .map(
       (m) => `    {
-        id = ${luaStr(m.id)},
+        id = ${luaStr(m.id)},${m.region ? `\n        region = ${luaStr(m.region)},` : ''}
         label = ${luaStr(m.label || m.name)},
         icon = ${luaStr(m.icon)},
         sprite = ${m.blipSprite},
@@ -241,7 +271,8 @@ ${z.polygon.map((p) => `            vector2(${p.x}, ${p.y})`).join(',\n')}
 
   const labels = data.labels
     .map(
-      (l) => `    { text = ${luaStr(l.text)}, coords = vector2(${l.position.x}, ${l.position.y}), size = ${l.size}, color = ${luaStr(l.color)} }`,
+      (l) =>
+        `    { text = ${luaStr(l.text)}, coords = vector2(${l.position.x}, ${l.position.y}), size = ${l.size}, color = ${luaStr(l.color)}${l.region ? `, region = ${luaStr(l.region)}` : ''} }`,
     )
     .join(',\n')
 
@@ -259,7 +290,20 @@ Config.ShowZoneBlips = true
 Config.ShowMarkerBlips = true
 -- Draw zone names as 3D text when the player is nearby.
 Config.DrawZoneNames = false
-
+${
+  doc.cayoPerico
+    ? `
+-- Cayo Perico island. Needs sv_enforceGameBuild ${CAYO_PERICO.minGameBuild} or newer in server.cfg.
+-- Within LoadDistance of Center the island is streamed and the radar / pause map
+-- switch to the island map, like GTA Online does.
+Config.CayoPerico = {
+    Enabled = true,
+    Center = vector3(${CAYO_PERICO.center.x}, ${CAYO_PERICO.center.y}, ${CAYO_PERICO.center.z.toFixed(1)}),
+    LoadDistance = ${CAYO_PERICO.loadDistance.toFixed(1)}
+}
+`
+    : ''
+}
 Config.Zones = {
 ${zones}
 }
@@ -274,7 +318,7 @@ ${labels}
 `
 }
 
-function clientLua(opts: ExportOptions) {
+function clientLua(opts: ExportOptions, doc: MapDocument) {
   return `-- Generated by LABSEVE7 Map Studio
 local zoneBlips, markerBlips = {}, {}
 
@@ -326,7 +370,32 @@ CreateThread(function()
     createZoneBlips()
     createMarkerBlips()
 end)
-
+${
+  doc.cayoPerico
+    ? `
+-- Cayo Perico: streams the island and switches the radar / pause map to the island
+-- map while the player is near it (Config.CayoPerico).
+CreateThread(function()
+    local cayo = Config.CayoPerico
+    if not cayo or not cayo.Enabled then return end
+    if GetGameBuildNumber() < ${CAYO_PERICO.minGameBuild} then
+        print(("[%s] Cayo Perico needs sv_enforceGameBuild ${CAYO_PERICO.minGameBuild} or newer in server.cfg"):format(GetCurrentResourceName()))
+        return
+    end
+    local loaded = nil
+    while true do
+        local near = #(GetEntityCoords(PlayerPedId()) - cayo.Center) < cayo.LoadDistance
+        if near ~= loaded then
+            loaded = near
+            Citizen.InvokeNative(0x9A9D1BA639675CF1, "HeistIsland", near) -- SET_ISLAND_ENABLED: island map data
+            Citizen.InvokeNative(0x5E1460624D194A38, near) -- SET_USE_ISLAND_MAP: radar and pause map
+        end
+        Wait(2000)
+    end
+end)
+`
+    : ''
+}
 CreateThread(function()
     while true do
         Wait(0)
@@ -417,7 +486,7 @@ const htmlJs = `window.addEventListener("message", (event) => {
 });
 `
 
-const streamReadme = (cols: number, rows: number) => `HOW TO USE THESE TEXTURES
+const streamReadme = (cols: number, rows: number, cayo: boolean) => `HOW TO USE THESE TEXTURES
 =========================
 
 FiveM streams minimap textures from a .ytd texture dictionary. Browsers cannot
@@ -439,7 +508,18 @@ Steps:
 
 The client.lua already calls the standard SetMinimapComponentPosition fixes so the
 custom texture keeps the right aspect ratio.
+${
+  cayo
+    ? `
+CAYO PERICO
+  cayo_perico.png              your design over the island (reference / NUI use)
+
+Cayo Perico lies outside the vanilla minimap_sea grid: the game draws it with its own
+island map, which client.lua switches on near the island. The minimap_sea tiles above
+therefore only contain Los Santos; zones and markers on the island still become blips.
 `
+    : ''
+}`
 
 const readme = (name: string, project: Project) => `# ${name}
 
@@ -449,7 +529,17 @@ Generated with **LABSEVE7 Map Studio** from project "${project.name}".
 1. Drop the \`${name}\` folder into your server's \`resources/\` directory
 2. Add \`ensure ${name}\` to \`server.cfg\`
 3. (Optional) Convert each \`stream/minimap_sea_R_C.png\` into its own \`minimap_sea_R_C.ytd\` – see \`stream/README.txt\`
+${
+  project.document.cayoPerico
+    ? `4. Cayo Perico ships with game build ${CAYO_PERICO.minGameBuild}: add \`sv_enforceGameBuild ${CAYO_PERICO.minGameBuild}\` (or newer) to \`server.cfg\`
 
+## Cayo Perico
+Near the island (\`Config.CayoPerico\` in \`config/config.lua\`) the resource streams it and
+switches the radar / pause map to the island map. Zones, markers and labels you placed on it
+are exported with real GTA coordinates and tagged \`region = "cayo_perico"\`.
+`
+    : ''
+}
 ## Contents
 - \`fxmanifest.lua\` – resource manifest
 - \`client.lua\` – creates zone/marker blips and applies minimap fixes
@@ -460,6 +550,19 @@ Generated with **LABSEVE7 Map Studio** from project "${project.name}".
 - \`html/\` – optional NUI overlay with CSS effects (toggle with /minimapoverlay)
 `
 
+/** Copies a rectangle (document pixels, clamped to the canvas) into a new canvas. */
+function crop(source: HTMLCanvasElement, r: PixelRect) {
+  const x = Math.max(0, Math.floor(r.x))
+  const y = Math.max(0, Math.floor(r.y))
+  const w = Math.max(1, Math.min(source.width, Math.ceil(r.x + r.width)) - x)
+  const h = Math.max(1, Math.min(source.height, Math.ceil(r.y + r.height)) - y)
+  const out = document.createElement('canvas')
+  out.width = w
+  out.height = h
+  out.getContext('2d')!.drawImage(source, x, y, w, h, 0, 0, w, h)
+  return out
+}
+
 export async function exportFiveMResource(project: Project, opts: ExportOptions): Promise<Blob> {
   const doc = project.document
   const progress = (p: number, l: string) => opts.onProgress?.(p, l)
@@ -469,9 +572,10 @@ export async function exportFiveMResource(project: Project, opts: ExportOptions)
 
   progress(5, 'Collecting positions')
   const data = buildPositions(doc)
+  const frame = mapFrame(doc)
 
   root.file('fxmanifest.lua', fxmanifest(name, opts))
-  root.file('client.lua', clientLua(opts))
+  root.file('client.lua', clientLua(opts, doc))
   root.file('server.lua', serverLua)
   root.file('README.md', readme(name, project))
 
@@ -489,6 +593,17 @@ export async function exportFiveMResource(project: Project, opts: ExportOptions)
         exportedAt: new Date().toISOString(),
         world: doc.world,
         texture: { width: doc.baseMap.width, height: doc.baseMap.height },
+        ...(frame.cayo
+          ? {
+              canvas: { width: frame.width, height: frame.height, world: frame.world },
+              cayoPerico: {
+                center: CAYO_PERICO.center,
+                loadDistance: CAYO_PERICO.loadDistance,
+                minGameBuild: CAYO_PERICO.minGameBuild,
+                bounds: CAYO_PERICO.bounds,
+              },
+            }
+          : {}),
         ...data,
       },
       null,
@@ -508,20 +623,29 @@ export async function exportFiveMResource(project: Project, opts: ExportOptions)
     const full = await renderDocument(doc)
     const stream = root.folder('stream')!
     stream.file('minimap_full.png', await canvasToBlob(full, 'image/png'))
-    stream.file('README.txt', streamReadme(opts.tileColumns, opts.tileRows))
+    stream.file('README.txt', streamReadme(opts.tileColumns, opts.tileRows, !!frame.cayo))
+
+    // The minimap_sea grid only covers Los Santos (the game shows Cayo Perico with its own
+    // island map), so the tiles come from a render without the island and its elements.
+    let grid = full
+    if (frame.cayo) {
+      stream.file('cayo_perico.png', await canvasToBlob(crop(full, frame.cayo), 'image/png'))
+      progress(30, 'Rendering Los Santos tiles')
+      grid = await renderDocument({ ...doc, cayoPerico: false, elements: doc.elements.filter((e) => !isCayoElement(e, doc)) })
+    }
 
     if (opts.splitTiles) {
       const cols = Math.max(1, opts.tileColumns)
       const rows = Math.max(1, opts.tileRows)
-      const tw = Math.floor(full.width / cols)
-      const th = Math.floor(full.height / rows)
+      const tw = Math.floor(grid.width / cols)
+      const th = Math.floor(grid.height / rows)
       let i = 0
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
           const t = document.createElement('canvas')
           t.width = tw
           t.height = th
-          t.getContext('2d')!.drawImage(full, c * tw, r * th, tw, th, 0, 0, tw, th)
+          t.getContext('2d')!.drawImage(grid, c * tw, r * th, tw, th, 0, 0, tw, th)
           // Vanilla naming is minimap_sea_<row>_<col> (2 columns × 3 rows in the base game).
           stream.file(`minimap_sea_${r}_${c}.png`, await canvasToBlob(t, 'image/png'))
           i++

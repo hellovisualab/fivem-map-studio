@@ -28,6 +28,7 @@ const summarize = (p: Project): ProjectSummary => ({
   updatedAt: p.updatedAt,
   thumbnail: p.thumbnail,
   preset: p.document.baseMap.preset,
+  cayoPerico: !!p.document.cayoPerico,
   elementCount: p.document.elements.length,
   sizeBytes: JSON.stringify(p.document).length,
 })

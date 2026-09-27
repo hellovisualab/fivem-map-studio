@@ -9,6 +9,7 @@ import { useEditor } from '@/store/useEditor'
 import { useAuth } from '@/store/useAuth'
 import { exportFiveMResource, buildPositions } from '@/lib/exporter'
 import { overlayFxOf, OVERLAY_FX_BY_ID } from '@/lib/overlayFx'
+import { CAYO_PERICO } from '@/lib/cayo'
 import { getData } from '@/lib/data'
 import { downloadBlob, slugify, uid } from '@/lib/utils'
 import type { HistoryEntry } from '@/types'
@@ -149,7 +150,7 @@ export function ExportDialog({ open, onClose }: { open: boolean; onClose: () => 
               {`├─ fxmanifest.lua
 ├─ client.lua · server.lua
 ├─ config/ config.lua · zones.json · markers.json · labels.json · positions.json
-${includeTextures ? `├─ stream/ minimap_full.png${splitTiles ? ' · minimap_sea_0_0…2_3.png' : ''}\n` : ''}${includeHtml ? '└─ html/ index.html · style.css · overlay.png' : '└─ README.md'}`}
+${includeTextures ? `├─ stream/ minimap_full.png${splitTiles ? ' · minimap_sea_0_0…2_1.png' : ''}${doc.cayoPerico ? ' · cayo_perico.png' : ''}\n` : ''}${includeHtml ? '└─ html/ index.html · style.css · overlay.png' : '└─ README.md'}`}
             </pre>
           </div>
         </div>
@@ -175,6 +176,11 @@ ${includeTextures ? `├─ stream/ minimap_full.png${splitTiles ? ' · minimap_
               <li>JSON positions for other tools</li>
               <li>PNG tiles ready to pack into minimap_sea_*.ytd</li>
               {overlayFx.ids.length > 0 && <li>NUI overlay effects ({overlayFx.ids.length})</li>}
+              {doc.cayoPerico && (
+                <li className="text-brand-300">
+                  {CAYO_PERICO.name} loader &amp; island blips (game build {CAYO_PERICO.minGameBuild}+)
+                </li>
+              )}
             </ul>
           </div>
         </aside>

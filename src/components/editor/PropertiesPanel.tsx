@@ -1,9 +1,12 @@
-import { useRef, useState, type ReactNode } from 'react'
+import { useId, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Copy, Grid3X3, Pipette, Sparkles, Trash2, Upload } from 'lucide-react'
+import { Copy, Grid3X3, LocateFixed, Pipette, RotateCcw, Sparkles, Trash2, TreePalm, Upload } from 'lucide-react'
 import { useEditor } from '@/store/useEditor'
 import { useAuth } from '@/store/useAuth'
-import { FONTS, MARKER_ICONS, PALETTE, STYLE_PRESETS, TEXT_PRESETS, ZONE_TYPES } from '@/lib/constants'
+import { DEFAULT_WORLD, FONTS, MARKER_ICONS, PALETTE, STYLE_PRESETS, TEXT_PRESETS, ZONE_TYPES } from '@/lib/constants'
+import { CAYO_PERICO } from '@/lib/cayo'
+import { mapFrame } from '@/lib/mapFrame'
+import { canvasApi } from '@/lib/canvasApi'
 import { canvasToWorld, worldToCanvas } from '@/lib/geometry'
 import { getData } from '@/lib/data'
 import { importMinimapFiles } from '@/lib/importer'
@@ -93,9 +96,10 @@ function Section({ title, children, action }: { title: string; children: ReactNo
 }
 
 function Toggle({ checked, onChange, label, icon }: { checked: boolean; onChange: (v: boolean) => void; label: ReactNode; icon?: ReactNode }) {
+  const labelId = useId()
   return (
     <div className="flex items-center justify-between">
-      <span className="flex items-center gap-2 text-xs text-ink-300">
+      <span id={labelId} className="flex items-center gap-2 text-xs text-ink-300">
         {icon}
         {label}
       </span>
@@ -103,6 +107,7 @@ function Toggle({ checked, onChange, label, icon }: { checked: boolean; onChange
         type="button"
         role="switch"
         aria-checked={checked}
+        aria-labelledby={label ? labelId : undefined}
         onClick={() => onChange(!checked)}
         className={cn('relative h-5 w-9 shrink-0 rounded-full transition', checked ? 'bg-brand-500' : 'bg-ink-600')}
       >
@@ -383,6 +388,8 @@ function MapSettings() {
   const doc = useEditor((s) => s.doc)!
   const { updateDocument, commit } = useEditor.getState()
   const fileRef = useRef<HTMLInputElement>(null)
+  const frame = mapFrame(doc)
+  const vanillaWorld = doc.world.minX === DEFAULT_WORLD.minX && doc.world.maxX === DEFAULT_WORLD.maxX && doc.world.minY === DEFAULT_WORLD.minY && doc.world.maxY === DEFAULT_WORLD.maxY
 
   return (
     <div className="scrollbar-thin h-full overflow-y-auto">
@@ -401,6 +408,14 @@ function MapSettings() {
             {doc.baseMap.width} × {doc.baseMap.height}
           </span>
         </div>
+        {frame.cayo && (
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-ink-400">Canvas with island</span>
+            <span className="font-mono text-ink-300">
+              {frame.width} × {frame.height}
+            </span>
+          </div>
+        )}
         <Button variant="outline" size="sm" className="w-full" onClick={() => fileRef.current?.click()}>
           <Upload className="h-3.5 w-3.5" /> Replace base map
         </Button>
@@ -426,6 +441,38 @@ function MapSettings() {
           }}
         />
       </Section>
+      <Section title="Islands">
+        <Toggle
+          checked={!!doc.cayoPerico}
+          onChange={(v) => {
+            updateDocument({ cayoPerico: v })
+            // The canvas grows or shrinks around the island; frame the whole map again.
+            setTimeout(() => canvasApi.fit(), 60)
+          }}
+          icon={<TreePalm className="h-3.5 w-3.5" />}
+          label={
+            <>
+              {CAYO_PERICO.name}
+              <span className="rounded border border-brand-500/40 bg-brand-500/10 px-1 text-[9px] font-bold tracking-wide text-brand-300 uppercase">New</span>
+            </>
+          }
+        />
+        <p className="text-[11px] text-ink-500">
+          {doc.cayoPerico ? (
+            <>
+              Stylized island south-east of Los Santos. Zones, markers and labels on it export with real GTA coordinates, and the resource streams the island
+              in-game (server needs <code className="rounded bg-ink-800 px-1 text-ink-300">sv_enforceGameBuild {CAYO_PERICO.minGameBuild}</code> or newer).
+            </>
+          ) : (
+            'Add the Cayo Perico island to design zones and blips on it too.'
+          )}
+        </p>
+        {frame.cayo && (
+          <Button variant="outline" size="sm" className="w-full" onClick={() => frame.cayo && canvasApi.fitRect(frame.cayo)}>
+            <LocateFixed className="h-3.5 w-3.5" /> Go to {CAYO_PERICO.name}
+          </Button>
+        )}
+      </Section>
       <MapStyleSections />
       <OverlayFxSection />
       <Section title="Grid">
@@ -444,7 +491,16 @@ function MapSettings() {
           <NumberInput value={doc.grid.size} min={8} step={8} onChange={(v) => updateDocument({ grid: { ...doc.grid, size: Math.max(8, v) } })} />
         </Field>
       </Section>
-      <Section title="World bounds (GTA coords)">
+      <Section
+        title="World bounds (GTA coords)"
+        action={
+          !vanillaWorld && (
+            <button className="flex items-center gap-1 text-[11px] text-ink-400 hover:text-ink-200" onClick={() => updateDocument({ world: { ...DEFAULT_WORLD } })} title="Use the vanilla minimap_sea grid">
+              <RotateCcw className="h-3 w-3" /> GTA V grid
+            </button>
+          )
+        }
+      >
         <div className="grid grid-cols-2 gap-2">
           <Field label="Min X">
             <NumberInput value={doc.world.minX} onChange={(v) => updateDocument({ world: { ...doc.world, minX: v } })} />
@@ -459,7 +515,9 @@ function MapSettings() {
             <NumberInput value={doc.world.maxY} onChange={(v) => updateDocument({ world: { ...doc.world, maxY: v } })} />
           </Field>
         </div>
-        <p className="text-[11px] text-ink-500">Used to convert pixels into in-game coordinates for zones and blips.</p>
+        <p className="text-[11px] text-ink-500">
+          World area the base texture covers, used to convert pixels into in-game coordinates for zones and blips. The vanilla minimap_sea grid spans X −4140…4860, Y −5100…8400.
+        </p>
       </Section>
     </div>
   )

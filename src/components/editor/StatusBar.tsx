@@ -2,6 +2,7 @@ import { Crosshair, Grid3X3, Maximize, Minus, Plus } from 'lucide-react'
 import { useEditor } from '@/store/useEditor'
 import { canvasApi } from '@/lib/canvasApi'
 import { canvasToWorld } from '@/lib/geometry'
+import { isInCayo } from '@/lib/cayo'
 import { cn, round } from '@/lib/utils'
 import { getData } from '@/lib/data'
 
@@ -12,6 +13,7 @@ export function StatusBar() {
   const selectedCount = useEditor((s) => s.selectedIds.length)
   const { updateDocument } = useEditor.getState()
   const world = pointer && doc ? canvasToWorld(pointer.x, pointer.y, doc) : null
+  const onCayo = !!doc?.cayoPerico && !!world && isInCayo(world.x, world.y)
 
   return (
     <footer className="flex h-9 shrink-0 items-center gap-3 border-t border-ink-800 bg-ink-900/80 px-3 text-[11px] text-ink-400 backdrop-blur">
@@ -26,6 +28,11 @@ export function StatusBar() {
             {world && (
               <span className="hidden sm:inline">
                 · <span className="text-brand-300">{round(world.x, 1)}</span>, <span className="text-brand-300">{round(world.y, 1)}</span> <span className="text-ink-600">gta</span>
+              </span>
+            )}
+            {onCayo && (
+              <span className="hidden rounded border border-accent-400/30 bg-accent-400/10 px-1.5 py-px font-sans text-[10px] font-semibold tracking-wide text-accent-300 uppercase sm:inline">
+                Cayo Perico
               </span>
             )}
           </>

@@ -147,6 +147,7 @@ export class SupabaseDataService implements DataService {
       updatedAt: r.updated_at,
       thumbnail: r.thumbnail ?? undefined,
       preset: r.document.baseMap.preset,
+      cayoPerico: !!r.document.cayoPerico,
       elementCount: r.document.elements.length,
       sizeBytes: JSON.stringify(r.document).length,
     }))

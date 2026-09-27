@@ -157,6 +157,7 @@ export function Dashboard() {
                             )}
                             <span className="bg-ink-950/80 text-ink-300 absolute top-2 left-2 rounded-md px-2 py-0.5 text-[10px] font-semibold tracking-wide uppercase backdrop-blur">
                               {PRESETS.find((x) => x.id === p.preset)?.name ?? p.preset}
+                              {p.cayoPerico && <span className="text-brand-300"> + Cayo</span>}
                             </span>
                           </div>
                           <div className="px-4 py-3">

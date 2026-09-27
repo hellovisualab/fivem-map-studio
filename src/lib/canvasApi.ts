@@ -11,4 +11,6 @@ export const canvasApi = {
   cancelDraft: () => {},
   hasDraft: () => false,
   centerOn: (_x: number, _y: number) => {},
+  /** Zooms and pans so a rectangle (document pixels) fills the view. */
+  fitRect: (_rect: { x: number; y: number; width: number; height: number }) => {},
 }
