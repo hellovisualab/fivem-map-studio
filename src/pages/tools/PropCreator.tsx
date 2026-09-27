@@ -19,8 +19,8 @@ import {
   meshCollisionGeometry,
   textureFromFile,
 } from '@/lib/propGeometry'
-import { PROP_ACCEPT, gtaModelName, ingestPropFiles } from '@/lib/propLoad'
-import { gateToolExport } from '@/lib/toolExport'
+import { PROP_ACCEPT, cleanModelName, fixModelName, gtaModelName, ingestPropFiles } from '@/lib/propLoad'
+import { canExportTool, recordToolExport } from '@/lib/toolExport'
 import { COLLISION_OPTIONS, COLLISION_QUALITY, type GizmoMode, type PropAsset, type RefKind } from '@/lib/propTypes'
 import { cn, downloadBlob, uid } from '@/lib/utils'
 
@@ -260,6 +260,7 @@ function AxisFields({
   linked,
   onLinked,
   onChange,
+  valid,
 }: {
   label: string
   values: [number, number, number]
@@ -267,6 +268,8 @@ function AxisFields({
   linked?: boolean
   onLinked?: () => void
   onChange: (next: [number, number, number]) => void
+  /** Rejects values such as a zero scale. */
+  valid?: (n: number) => boolean
 }) {
   return (
     <div>
@@ -287,7 +290,10 @@ function AxisFields({
             step={step}
             value={Number(values[i].toFixed(3))}
             onChange={(e) => {
+              // Ignore half-typed input ("", "-", "1e") instead of writing NaN into the prop.
+              if (e.target.value.trim() === '') return
               const n = Number(e.target.value)
+              if (!Number.isFinite(n) || (valid && !valid(n))) return
               if (linked) onChange([n, n, n])
               else {
                 const arr: [number, number, number] = [...values]
@@ -470,11 +476,13 @@ export function PropCreator() {
       toast.error('No props', 'Drop a 3D model first.')
       return
     }
+    if (!canExportTool()) return
     setBusy(true)
     try {
-      if (!(await gateToolExport('Prop Creator'))) return
-      const blob = await exportPropResource(props, projectName)
-      downloadBlob(blob, `${projectName || 'prop_pack'}.zip`)
+      const { blob, fileName, renamed } = await exportPropResource(props, projectName)
+      downloadBlob(blob, fileName)
+      await recordToolExport('Prop Creator')
+      if (renamed) toast.info('Model names fixed', `${renamed} prop${renamed === 1 ? ' had an empty or duplicate name' : 's had empty or duplicate names'} and got a unique one in the export.`)
     } catch (e) {
       toast.error('Export failed', (e as Error).message)
     } finally {
@@ -672,6 +680,14 @@ export function PropCreator() {
                     value={selected.name}
                     maxLength={24}
                     onChange={(e) => patchProp(selected.id, { name: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_') })}
+                    onBlur={() => {
+                      const used = new Set(props.filter((p) => p.id !== selected.id).map((p) => p.name))
+                      const name = fixModelName(selected.name, selected.label, used)
+                      if (name !== selected.name) {
+                        patchProp(selected.id, { name })
+                        if (cleanModelName(selected.name)) toast.info('Model name taken', `Renamed to ${name}: every prop needs its own model name.`)
+                      }
+                    }}
                   />
                 </label>
                 <label className="block">
@@ -679,7 +695,7 @@ export function PropCreator() {
                   <input className="field field-sm mt-0.5" value={selected.label} onChange={(e) => patchProp(selected.id, { label: e.target.value })} />
                 </label>
                 <p className="text-[10px] text-ink-500">
-                  {selected.vertexCount.toLocaleString()} verts · {selected.triangleCount.toLocaleString()} tris · {selected.size.map((n) => n.toFixed(2)).join(' × ')} m
+                  {selected.vertexCount.toLocaleString()} verts · {selected.triangleCount.toLocaleString()} tris · {selected.size.map((n, i) => (n * Math.abs(selected.scale[i])).toFixed(2)).join(' × ')} m
                 </p>
                 <div className="flex gap-1">
                   <Button variant="outline" size="sm" className="flex-1" onClick={duplicateSelected}>
@@ -707,6 +723,7 @@ export function PropCreator() {
                   step={0.01}
                   linked={linkScale}
                   onLinked={() => setLinkScale((v) => !v)}
+                  valid={(n) => Math.abs(n) >= 0.0001}
                   onChange={(scale) => patchProp(selected.id, { scale })}
                 />
                 <div className="grid grid-cols-2 gap-1">
@@ -823,7 +840,9 @@ export function PropCreator() {
                       try {
                         const live = findMaterial(selected.object, uuid)
                         if (!live) return
-                        const tex = await textureFromFile(file, live.map ? live.map.flipY : true)
+                        // glTF UVs expect unflipped textures; OBJ / FBX / STL and primitives use three's default.
+                        const gltf = /\.(glb|gltf)$/i.test(selected.file.name)
+                        const tex = await textureFromFile(file, live.map ? live.map.flipY : !gltf)
                         live.map?.dispose()
                         live.map = tex
                         live.needsUpdate = true

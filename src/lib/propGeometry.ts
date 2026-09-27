@@ -293,9 +293,14 @@ export function gtaBounds(min: THREE.Vector3, max: THREE.Vector3) {
   return { bbMin, bbMax, bsCentre, bsRadius }
 }
 
+/**
+ * Vertex-clustering decimation. Keeps material groups and UVs: vertices only merge
+ * within the same material and UV cell, so textures stay mapped and UV seams stay open.
+ */
 export function simplifyGeometry(geometry: THREE.BufferGeometry, ratio: number): THREE.BufferGeometry {
   const src = geometry.index ? geometry.toNonIndexed() : geometry.clone()
   const pos = src.getAttribute('position')
+  const uv = src.getAttribute('uv')
   const keep = Math.max(0.04, Math.min(1, ratio))
   if (!pos || pos.count < 48 || keep >= 0.98) return src
   src.computeBoundingBox()
@@ -305,46 +310,61 @@ export function simplifyGeometry(geometry: THREE.BufferGeometry, ratio: number):
   const dx = Math.max(1e-8, bb.max.x - bb.min.x)
   const dy = Math.max(1e-8, bb.max.y - bb.min.y)
   const dz = Math.max(1e-8, bb.max.z - bb.min.z)
-  const clusters = new Map<string, { x: number; y: number; z: number; n: number; i: number }>()
-  const remap: number[] = new Array(pos.count)
-  const verts: number[] = []
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i)
-    const y = pos.getY(i)
-    const z = pos.getZ(i)
-    const cx = Math.min(cells - 1, Math.floor(((x - bb.min.x) / dx) * cells))
-    const cy = Math.min(cells - 1, Math.floor(((y - bb.min.y) / dy) * cells))
-    const cz = Math.min(cells - 1, Math.floor(((z - bb.min.z) / dz) * cells))
-    const key = `${cx}:${cy}:${cz}`
-    let cluster = clusters.get(key)
-    if (!cluster) {
-      cluster = { x: 0, y: 0, z: 0, n: 0, i: verts.length / 3 }
-      clusters.set(key, cluster)
-      verts.push(0, 0, 0)
-    }
-    cluster.x += x
-    cluster.y += y
-    cluster.z += z
-    cluster.n += 1
-    remap[i] = cluster.i
-  }
-  for (const c of clusters.values()) {
-    verts[c.i * 3] = c.x / c.n
-    verts[c.i * 3 + 1] = c.y / c.n
-    verts[c.i * 3 + 2] = c.z / c.n
-  }
+  const cell = (v: number, min: number, d: number) => Math.min(cells - 1, Math.floor(((v - min) / d) * cells))
+  const groups = src.groups.length ? src.groups : [{ start: 0, count: pos.count, materialIndex: 0 }]
+  const clusters = new Map<string, { x: number; y: number; z: number; u: number; v: number; n: number; i: number }>()
+  const list: { x: number; y: number; z: number; u: number; v: number; n: number }[] = []
+  const out = new THREE.BufferGeometry()
   const indices: number[] = []
-  for (let i = 0; i + 2 < pos.count; i += 3) {
-    const a = remap[i]
-    const b = remap[i + 1]
-    const c = remap[i + 2]
-    if (a !== b && b !== c && a !== c) indices.push(a, b, c)
+  for (const group of groups) {
+    const first = indices.length
+    const end = Math.min(pos.count, group.start + group.count)
+    const remap = (i: number) => {
+      const x = pos.getX(i)
+      const y = pos.getY(i)
+      const z = pos.getZ(i)
+      const u = uv ? uv.getX(i) : 0
+      const v = uv ? uv.getY(i) : 0
+      const uvKey = uv ? `${Math.floor(u * cells)}:${Math.floor(v * cells)}` : ''
+      const key = `${group.materialIndex ?? 0}:${cell(x, bb.min.x, dx)}:${cell(y, bb.min.y, dy)}:${cell(z, bb.min.z, dz)}:${uvKey}`
+      let c = clusters.get(key)
+      if (!c) {
+        c = { x: 0, y: 0, z: 0, u: 0, v: 0, n: 0, i: list.length }
+        clusters.set(key, c)
+        list.push(c)
+      }
+      c.x += x
+      c.y += y
+      c.z += z
+      c.u += u
+      c.v += v
+      c.n += 1
+      return c.i
+    }
+    for (let i = group.start; i + 2 < end; i += 3) {
+      const a = remap(i)
+      const b = remap(i + 1)
+      const c = remap(i + 2)
+      if (a !== b && b !== c && a !== c) indices.push(a, b, c)
+    }
+    if (indices.length > first) out.addGroup(first, indices.length - first, group.materialIndex ?? 0)
   }
   if (indices.length < 9) return src
-  const out = new THREE.BufferGeometry()
-  out.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
+  const verts = new Float32Array(list.length * 3)
+  const uvs = new Float32Array(list.length * 2)
+  list.forEach((c, i) => {
+    verts[i * 3] = c.x / c.n
+    verts[i * 3 + 1] = c.y / c.n
+    verts[i * 3 + 2] = c.z / c.n
+    uvs[i * 2] = c.u / c.n
+    uvs[i * 2 + 1] = c.v / c.n
+  })
+  out.setAttribute('position', new THREE.BufferAttribute(verts, 3))
+  if (uv) out.setAttribute('uv', new THREE.BufferAttribute(uvs, 2))
   out.setIndex(indices)
+  if (!src.groups.length) out.clearGroups()
   out.computeVertexNormals()
+  src.dispose()
   return out
 }
 
@@ -400,6 +420,11 @@ export function simplifyObject(root: THREE.Object3D, ratio: number): THREE.Group
   return baked
 }
 
+/** Nearest power of two in 4–4096: what a texture dictionary (DXT) expects. */
+export function powerOfTwo(n: number) {
+  return Math.min(4096, Math.max(4, 2 ** Math.round(Math.log2(Math.max(1, n)))))
+}
+
 export async function canvasPng(image: CanvasImageSource, w: number, h: number): Promise<Blob> {
   const canvas = document.createElement('canvas')
   canvas.width = Math.max(1, w)
@@ -412,33 +437,43 @@ export async function canvasPng(image: CanvasImageSource, w: number, h: number):
   })
 }
 
+/**
+ * Material textures as PNGs ready for a texture dictionary: diffuse maps as `<name>.png`,
+ * normal maps as `<name>_n.png`, resized to power-of-two sides. Unreadable (GPU-only)
+ * textures are skipped.
+ */
 export async function extractMaterialTextures(root: THREE.Object3D): Promise<{ name: string; blob: Blob }[]> {
-  const out: { name: string; blob: Blob }[] = []
+  const slots: { tex: THREE.Texture; base: string; suffix: string }[] = []
   const seen = new Set<string>()
-  const jobs: Promise<void>[] = []
   root.traverse((c) => {
     const mesh = c as THREE.Mesh
     if (!mesh.isMesh) return
     for (const mat of flattenMaterials(mesh.material)) {
       const std = mat as THREE.MeshStandardMaterial
-      const map = std.map
-      if (!map?.image || seen.has(map.uuid)) continue
-      seen.add(map.uuid)
-      const img = map.image as CanvasImageSource & { width?: number; height?: number }
-      const w = img.width || 256
-      const h = img.height || 256
-      const name = (map.name || std.name || `tex_${out.length}`).replace(/[^\w.-]+/g, '_')
-      jobs.push(
-        canvasPng(img, w, h)
-          .then((blob) => {
-            out.push({ name: `${name}.png`, blob })
-          })
-          .catch(() => {
-            /* skip unreadable GPU textures */
-          }),
-      )
+      const normal = std.normalMap ?? std.bumpMap
+      for (const [tex, suffix] of [
+        [std.map, ''],
+        [normal, '_n'],
+      ] as const) {
+        if (!tex?.image || seen.has(tex.uuid)) continue
+        seen.add(tex.uuid)
+        slots.push({ tex, base: tex.name || std.name || 'texture', suffix })
+      }
     }
   })
-  await Promise.all(jobs)
-  return out
+  const used = new Set<string>()
+  const jobs = slots.map(async ({ tex, base, suffix }) => {
+    const img = tex.image as CanvasImageSource & { width?: number; height?: number }
+    const clean = base.replace(/\.[a-z]{3,4}$/i, '').replace(/[^\w-]+/g, '_').replace(/^_+|_+$/g, '') || 'texture'
+    let name = `${clean}${suffix}`
+    for (let i = 2; used.has(name.toLowerCase()); i++) name = `${clean}_${i}${suffix}`
+    used.add(name.toLowerCase())
+    try {
+      const blob = await canvasPng(img, powerOfTwo(img.width || 256), powerOfTwo(img.height || 256))
+      return { name: `${name}.png`, blob }
+    } catch {
+      return null
+    }
+  })
+  return (await Promise.all(jobs)).filter((t): t is { name: string; blob: Blob } => t !== null)
 }
