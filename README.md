@@ -113,7 +113,7 @@ src/
 ├─ stream/
 │  ├─ minimap_full.png
 │  ├─ minimap_sea_0_0.png … minimap_sea_2_1.png
-│  └─ README.txt         how to pack the PNGs into minimap.ytd with OpenIV
+│  └─ README.txt         how to pack each PNG into its minimap_sea_R_C.ytd with OpenIV
 └─ html/                 optional NUI overlay
 ```
 

@@ -125,7 +125,7 @@ export function ExportDialog({ open, onClose }: { open: boolean; onClose: () => 
             <span className="label">Contents</span>
             {[
               { k: 'textures', label: 'Minimap textures (stream/)', desc: 'Full PNG render of your map', v: includeTextures, set: setIncludeTextures },
-              { k: 'tiles', label: 'Split into 2×3 tiles', desc: 'minimap_sea_R_C.png (vanilla layout), ready for minimap.ytd', v: splitTiles && includeTextures, set: setSplitTiles, disabled: !includeTextures },
+              { k: 'tiles', label: 'Split into 2×3 tiles', desc: 'minimap_sea_R_C.png (vanilla layout), one per minimap_sea_R_C.ytd', v: splitTiles && includeTextures, set: setSplitTiles, disabled: !includeTextures },
               { k: 'html', label: 'NUI overlay (html/)', desc: overlayFx.ids.length ? `Animates ${fxSummary} · /minimapoverlay` : 'Toggle with /minimapoverlay in-game', v: includeHtml, set: setIncludeHtml },
             ].map((o) => (
               <label key={o.k} className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition ${o.v ? 'border-brand-500/40 bg-brand-500/5' : 'border-ink-700 hover:border-ink-500'} ${o.disabled ? 'opacity-50' : ''}`}>
@@ -173,7 +173,7 @@ ${includeTextures ? `├─ stream/ minimap_full.png${splitTiles ? ' · minimap_
               <li>fxmanifest.lua + client/server Lua</li>
               <li>Zones &amp; blips in GTA coordinates</li>
               <li>JSON positions for other tools</li>
-              <li>PNG textures ready for minimap.ytd</li>
+              <li>PNG tiles ready to pack into minimap_sea_*.ytd</li>
               {overlayFx.ids.length > 0 && <li>NUI overlay effects ({overlayFx.ids.length})</li>}
             </ul>
           </div>
