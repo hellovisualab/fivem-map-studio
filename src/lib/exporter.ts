@@ -309,12 +309,9 @@ local function createMarkerBlips()
 end
 
 -- Standard fix so a custom minimap texture keeps the right aspect ratio.
+-- The textures themselves are replaced by the minimap_sea_R_C.ytd files in stream/.
 local function setupMinimap()
-    RequestStreamedTextureDict("minimap", false)
-    RequestStreamedTextureDict("minimap_sea_0_0", false)
     SetMinimapClipType(0)
-    AddReplaceTexture("platform:/textures/graphics", "radarmasksm", "minimap", "radarmasksm")
-    AddReplaceTexture("platform:/textures/graphics", "radarmask1g", "minimap", "radarmasksm")
     SetMinimapComponentPosition("minimap", "L", "B", -0.0100, 0.030, 0.150, 0.188888)
     SetMinimapComponentPosition("minimap_mask", "L", "B", 0.200, 0.0, 0.065, 0.20)
     SetMinimapComponentPosition("minimap_blur", "L", "B", -0.00, 0.015, 0.252, 0.338)
@@ -371,11 +368,26 @@ end, false)
 -- Exports for other resources
 exports("GetZones", function() return Config.Zones end)
 exports("GetMarkers", function() return Config.Markers end)
+-- Even-odd ray cast so polygon and rotated zones match their real shape.
+local function pointInPolygon(x, y, poly)
+    local inside, j = false, #poly
+    for i = 1, #poly do
+        local a, b = poly[i], poly[j]
+        if (a.y > y) ~= (b.y > y) and x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x then
+            inside = not inside
+        end
+        j = i
+    end
+    return inside
+end
+
 exports("GetZoneAt", function(x, y)
     for _, zone in ipairs(Config.Zones) do
         local hx, hy = zone.size.x / 2, zone.size.y / 2
         if x >= zone.center.x - hx and x <= zone.center.x + hx and y >= zone.center.y - hy and y <= zone.center.y + hy then
-            return zone
+            if not zone.polygon or #zone.polygon < 3 or pointInPolygon(x, y, zone.polygon) then
+                return zone
+            end
         end
     end
     return nil
@@ -414,10 +426,15 @@ write .ytd files, so this folder contains ready-to-pack PNGs:
   minimap_full.png             full composited minimap (reference / NUI use)
   minimap_sea_R_C.png          ${cols} columns x ${rows} rows (R = row, C = column), same naming as the vanilla textures
 
+The game loads each minimap tile from its own texture dictionary, so every PNG
+becomes one .ytd with the same name (minimap_sea_0_0.png -> minimap_sea_0_0.ytd).
+
 Steps:
-  1. Open OpenIV (or CodeWalker) and create a new texture dictionary named minimap.ytd
-  2. Import every minimap_sea_R_C.png, keeping the file names as texture names
-  3. Save minimap.ytd inside this stream/ folder and delete the PNGs
+  1. Open OpenIV (or CodeWalker) and, for each minimap_sea_R_C.png, create a texture
+     dictionary named minimap_sea_R_C.ytd
+  2. Import the matching PNG into it, keeping the file name as the texture name
+     (minimap_sea_R_C) - DXT5 / BC3 keeps the transparent sea
+  3. Save the ${cols * rows} .ytd files inside this stream/ folder and delete the PNGs
   4. Restart the resource: ensure ${'<resource>'} in server.cfg
 
 The client.lua already calls the standard SetMinimapComponentPosition fixes so the
@@ -431,7 +448,7 @@ Generated with **LABSEVE7 Map Studio** from project "${project.name}".
 ## Install
 1. Drop the \`${name}\` folder into your server's \`resources/\` directory
 2. Add \`ensure ${name}\` to \`server.cfg\`
-3. (Optional) Convert \`stream/*.png\` into \`minimap.ytd\` – see \`stream/README.txt\`
+3. (Optional) Convert each \`stream/minimap_sea_R_C.png\` into its own \`minimap_sea_R_C.ytd\` – see \`stream/README.txt\`
 
 ## Contents
 - \`fxmanifest.lua\` – resource manifest
