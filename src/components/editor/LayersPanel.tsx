@@ -30,7 +30,7 @@ const swatch = (el: MapElement) => {
   }
 }
 
-export function LayersPanel() {
+export function LayersPanel({ embedded = false }: { embedded?: boolean }) {
   const elements = useEditor((s) => s.doc?.elements ?? [])
   const selectedIds = useEditor((s) => s.selectedIds)
   const { select, toggleVisible, toggleLocked, moveLayer, commit } = useEditor.getState()
@@ -59,11 +59,13 @@ export function LayersPanel() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between px-3 pt-3 pb-2">
-        <h3 className="text-sm font-semibold">Layers</h3>
-        <span className="text-[11px] text-ink-500">{elements.length}</span>
-      </div>
-      <div className="px-3 pb-2">
+      {!embedded && (
+        <div className="flex items-center justify-between px-3 pt-3 pb-2">
+          <h3 className="text-sm font-semibold">Layers</h3>
+          <span className="text-[11px] text-ink-500">{elements.length}</span>
+        </div>
+      )}
+      <div className={cn('px-3 pb-2', embedded && 'pt-2')}>
         <div className="relative">
           <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-ink-500" />
           <input className="field-sm pl-8" placeholder="Search layers..." value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -72,7 +74,7 @@ export function LayersPanel() {
       <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         {filtered.length === 0 ? (
           <p className="px-2 py-6 text-center text-xs text-ink-500">
-            {elements.length === 0 ? 'Nothing placed yet - add text, images or zones.' : 'No layers match your search.'}
+            {elements.length === 0 ? 'Nothing placed yet. Draw a zone, drop a marker or add text from the toolbar.' : 'No layers match your search.'}
           </p>
         ) : (
           <Reorder.Group axis="y" values={filtered} onReorder={onReorder} className="space-y-0.5">

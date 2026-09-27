@@ -28,8 +28,9 @@ function SaveIndicator() {
 export function TopBar({ onExport, onImport, docSize }: { onExport: () => void; onImport: () => void; docSize: number }) {
   const navigate = useNavigate()
   const project = useEditor((s) => s.project)
-  const panels = useEditor((s) => s.panels)
-  const { renameProject, togglePanel, save } = useEditor.getState()
+  const sidePanel = useEditor((s) => s.sidePanel)
+  const sideTab = useEditor((s) => s.sideTab)
+  const { renameProject, toggleSide, save } = useEditor.getState()
   const user = useAuth((s) => s.user)
   const remaining = useAuth((s) => s.exportsRemaining())
   const [name, setName] = useState(project?.name ?? '')
@@ -90,11 +91,11 @@ export function TopBar({ onExport, onImport, docSize }: { onExport: () => void; 
       </div>
 
       <div className="flex shrink-0 items-center gap-1.5">
-        <Button variant="ghost" size="icon" className="hidden md:inline-flex" onClick={() => togglePanel('layers')} title="Toggle layers panel">
-          <Layers className={cn('h-4 w-4', panels.layers && 'text-brand-400')} />
+        <Button variant="ghost" size="icon" className="hidden md:inline-flex" onClick={() => toggleSide('layers')} title="Layers" aria-pressed={sidePanel && sideTab === 'layers'}>
+          <Layers className={cn('h-4 w-4', sidePanel && sideTab === 'layers' && 'text-brand-400')} />
         </Button>
-        <Button variant="ghost" size="icon" className="hidden md:inline-flex" onClick={() => togglePanel('properties')} title="Toggle properties panel">
-          <PanelRight className={cn('h-4 w-4', panels.properties && 'text-brand-400')} />
+        <Button variant="ghost" size="icon" className="hidden md:inline-flex" onClick={() => toggleSide('design')} title="Design panel" aria-pressed={sidePanel && sideTab === 'design'}>
+          <PanelRight className={cn('h-4 w-4', sidePanel && sideTab === 'design' && 'text-brand-400')} />
         </Button>
         <Button
           variant="ghost"

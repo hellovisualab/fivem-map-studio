@@ -2,6 +2,8 @@ import { useEffect } from 'react'
 import { useEditor } from '@/store/useEditor'
 import { canvasApi } from '@/lib/canvasApi'
 import { toast } from '@/components/ui/Toast'
+import { arrangeSelection, copySelection, cutSelection, pasteClipboard } from '@/lib/editorActions'
+import { rotatePoint } from '@/lib/geometry'
 import type { ToolId } from '@/types'
 
 const TOOL_KEYS: Record<string, ToolId> = {
@@ -18,8 +20,19 @@ const TOOL_KEYS: Record<string, ToolId> = {
 const isEditable = (t: EventTarget | null) =>
   t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || (t instanceof HTMLElement && t.isContentEditable)
 
-export function useShortcuts(opts: { onExport: () => void }) {
+export function useShortcuts(opts: { onExport: () => void; onHelp: () => void }) {
   useEffect(() => {
+    // Ctrl+V: the paste event carries clipboard images (screenshots become image
+    // elements); without one, the copied map elements are pasted.
+    let pasteHandled = false
+    const onPaste = (e: ClipboardEvent) => {
+      if (isEditable(e.target) || !useEditor.getState().doc) return
+      pasteHandled = true
+      const files = Array.from(e.clipboardData?.files ?? []).filter((f) => /^image\/(png|jpe?g|webp)$/.test(f.type))
+      e.preventDefault()
+      if (files.length) void canvasApi.addImageFiles(files)
+      else pasteClipboard()
+    }
     const onKey = (e: KeyboardEvent) => {
       const s = useEditor.getState()
       if (!s.doc) return
@@ -43,6 +56,21 @@ export function useShortcuts(opts: { onExport: () => void }) {
       if (mod && key === 'y') {
         e.preventDefault()
         s.redo()
+        return
+      }
+      if (mod && (key === 'c' || key === 'x')) {
+        if (!s.selectedIds.length || window.getSelection()?.toString()) return
+        e.preventDefault()
+        if (key === 'c') copySelection()
+        else cutSelection()
+        return
+      }
+      if (mod && key === 'v') {
+        // Browsers that don't fire `paste` outside text fields still paste elements.
+        pasteHandled = false
+        window.setTimeout(() => {
+          if (!pasteHandled) pasteClipboard()
+        }, 0)
         return
       }
       if (mod && key === 'd') {
@@ -76,15 +104,26 @@ export function useShortcuts(opts: { onExport: () => void }) {
         return
       }
       if (mod) return
+      if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+        e.preventDefault()
+        opts.onHelp()
+        return
+      }
 
       switch (key) {
         case 'delete':
         case 'backspace':
           e.preventDefault()
+          if (s.pointEditId) {
+            // While editing points, Delete removes the selected point, never the shape.
+            if (s.activeVertex !== null && !s.deleteVertex(s.pointEditId, s.activeVertex)) toast.info('Cannot remove this point', 'Zones need at least 3 points, lines 2.')
+            return
+          }
           s.deleteSelected()
           return
         case 'escape':
           if (canvasApi.hasDraft()) canvasApi.cancelDraft()
+          else if (s.pointEditId) s.setPointEdit(null)
           else if (s.selectedIds.length) s.clearSelection()
           else s.setTool('select')
           return
@@ -92,6 +131,14 @@ export function useShortcuts(opts: { onExport: () => void }) {
           if (canvasApi.hasDraft()) {
             e.preventDefault()
             canvasApi.finishDraft()
+          } else if (s.pointEditId) {
+            s.setPointEdit(null)
+          } else if (s.selectedIds.length === 1) {
+            const el = s.doc.elements.find((x) => x.id === s.selectedIds[0])
+            if (el && (el.type === 'zone' || el.type === 'line')) {
+              e.preventDefault()
+              s.setPointEdit(el.id)
+            }
           }
           return
         case 'g':
@@ -109,10 +156,14 @@ export function useShortcuts(opts: { onExport: () => void }) {
           if (e.shiftKey) canvasApi.fit()
           return
         case '[':
-          if (s.selectedIds.length === 1) s.moveLayer(s.selectedIds[0], e.shiftKey ? 'bottom' : 'down')
+        case '{':
+          if (e.shiftKey) arrangeSelection('bottom')
+          else if (s.selectedIds.length === 1) s.moveLayer(s.selectedIds[0], 'down')
           return
         case ']':
-          if (s.selectedIds.length === 1) s.moveLayer(s.selectedIds[0], e.shiftKey ? 'top' : 'up')
+        case '}':
+          if (e.shiftKey) arrangeSelection('top')
+          else if (s.selectedIds.length === 1) s.moveLayer(s.selectedIds[0], 'up')
           return
         case 'arrowup':
         case 'arrowdown':
@@ -123,6 +174,21 @@ export function useShortcuts(opts: { onExport: () => void }) {
           const step = e.shiftKey ? 10 : 1
           const dx = key === 'arrowleft' ? -step : key === 'arrowright' ? step : 0
           const dy = key === 'arrowup' ? -step : key === 'arrowdown' ? step : 0
+          const vi = s.activeVertex
+          if (s.pointEditId && vi !== null) {
+            // Nudge the selected point (in the shape's own, possibly rotated, frame).
+            s.commit((d) => {
+              d.elements = d.elements.map((el) => {
+                if (el.id !== s.pointEditId || (el.type !== 'zone' && el.type !== 'line')) return el
+                const local = rotatePoint(dx, dy, -el.rotation)
+                const points = [...el.points]
+                points[vi * 2] += local.x
+                points[vi * 2 + 1] += local.y
+                return { ...el, points }
+              })
+            })
+            return
+          }
           s.commit((d) => {
             d.elements = d.elements.map((el) => (s.selectedIds.includes(el.id) && !el.locked ? { ...el, x: el.x + dx, y: el.y + dy } : el))
           })
@@ -142,6 +208,10 @@ export function useShortcuts(opts: { onExport: () => void }) {
       }
     }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('paste', onPaste)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('paste', onPaste)
+    }
   }, [opts])
 }

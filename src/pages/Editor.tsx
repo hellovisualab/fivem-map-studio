@@ -1,34 +1,36 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Layers, SlidersHorizontal } from 'lucide-react'
 import { useEditor } from '@/store/useEditor'
 import { getData } from '@/lib/data'
 import { renderDocument } from '@/lib/render'
-import { cn } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
 import { LogoMark } from '@/components/ui/Logo'
 import { MapCanvas } from '@/components/editor/MapCanvas'
 import { Toolbar } from '@/components/editor/Toolbar'
 import { LayersPanel } from '@/components/editor/LayersPanel'
 import { PropertiesPanel } from '@/components/editor/PropertiesPanel'
+import { SidePanel, SideTabs } from '@/components/editor/SidePanel'
 import { TopBar } from '@/components/editor/TopBar'
 import { StatusBar } from '@/components/editor/StatusBar'
 import { ExportDialog } from '@/components/editor/ExportDialog'
 import { ImportDialog } from '@/components/editor/ImportDialog'
+import { ShortcutsDialog } from '@/components/editor/ShortcutsDialog'
 import { useShortcuts } from '@/hooks/useShortcuts'
 
 export function EditorPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const project = useEditor((s) => s.project)
-  const panels = useEditor((s) => s.panels)
+  const sidePanel = useEditor((s) => s.sidePanel)
+  const sideTab = useEditor((s) => s.sideTab)
   const saveState = useEditor((s) => s.saveState)
   const selectedCount = useEditor((s) => s.selectedIds.length)
   const [loading, setLoading] = useState(true)
   const [exportOpen, setExportOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
-  const [mobileTab, setMobileTab] = useState<'layers' | 'properties' | null>(null)
+  const [helpOpen, setHelpOpen] = useState(false)
+  const [mobileSheet, setMobileSheet] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -69,12 +71,15 @@ export function EditorPage() {
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
   }, [])
 
-  // Auto-open the properties sheet on mobile when something gets selected.
+  // Auto-open the design sheet on mobile when something gets selected.
   useEffect(() => {
-    if (selectedCount > 0 && window.innerWidth < 768 && mobileTab === null) setMobileTab('properties')
-  }, [selectedCount, mobileTab])
+    if (selectedCount > 0 && window.innerWidth < 768 && !mobileSheet) {
+      useEditor.getState().setSideTab('design')
+      setMobileSheet(true)
+    }
+  }, [selectedCount, mobileSheet])
 
-  const shortcutOpts = useMemo(() => ({ onExport: () => setExportOpen(true) }), [])
+  const shortcutOpts = useMemo(() => ({ onExport: () => setExportOpen(true), onHelp: () => setHelpOpen((v) => !v) }), [])
   useShortcuts(shortcutOpts)
 
   const docSize = useMemo(() => (project ? JSON.stringify(project.document).length : 0), [project])
@@ -109,64 +114,49 @@ export function EditorPage() {
           </div>
         </div>
 
-        {/* Desktop side panels */}
+        {/* Desktop side panel */}
         <AnimatePresence initial={false}>
-          {(panels.layers || panels.properties) && (
+          {sidePanel && (
             <motion.aside
               key="side"
               initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 300, opacity: 1 }}
+              animate={{ width: 316, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
               transition={{ type: 'spring', stiffness: 300, damping: 32 }}
-              className="hidden shrink-0 flex-col gap-2 overflow-hidden border-l border-ink-800 bg-ink-900/60 p-2 md:flex"
+              className="hidden shrink-0 overflow-hidden border-l border-ink-800 bg-ink-900/60 p-2 md:flex"
             >
-              <div className="flex h-full min-h-0 w-[284px] flex-col gap-2">
-                {panels.layers && (
-                  <div className={cn('panel flex min-h-0 flex-col overflow-hidden', panels.properties ? 'flex-[0_0_42%]' : 'flex-1')}>
-                    <LayersPanel />
-                  </div>
-                )}
-                {panels.properties && (
-                  <div className="panel flex min-h-0 flex-1 flex-col overflow-hidden">
-                    <PropertiesPanel />
-                  </div>
-                )}
+              <div className="h-full w-[300px]">
+                <SidePanel />
               </div>
             </motion.aside>
           )}
         </AnimatePresence>
       </div>
 
-      <StatusBar />
+      <StatusBar onHelp={() => setHelpOpen(true)} />
 
       {/* Mobile bottom sheet */}
       <div className="md:hidden">
-        <div className="flex border-t border-ink-800 bg-ink-900">
-          {(
-            [
-              ['layers', 'Layers', Layers],
-              ['properties', 'Properties', SlidersHorizontal],
-            ] as const
-          ).map(([tab, label, Icon]) => (
-            <button
-              key={tab}
-              onClick={() => setMobileTab(mobileTab === tab ? null : tab)}
-              className={cn('flex flex-1 items-center justify-center gap-2 py-2.5 text-xs font-medium transition', mobileTab === tab ? 'text-brand-400' : 'text-ink-400')}
-            >
-              <Icon className="h-4 w-4" /> {label}
-            </button>
-          ))}
+        <div className="flex items-center gap-2 border-t border-ink-800 bg-ink-900 px-2 py-1.5">
+          <SideTabs className="flex-1" />
+          <button
+            onClick={() => setMobileSheet((v) => !v)}
+            className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-ink-300 hover:bg-ink-800"
+            aria-expanded={mobileSheet}
+          >
+            {mobileSheet ? 'Hide' : 'Show'}
+          </button>
         </div>
         <AnimatePresence>
-          {mobileTab && (
+          {mobileSheet && (
             <motion.div
               initial={{ height: 0 }}
-              animate={{ height: '42vh' }}
+              animate={{ height: '46vh' }}
               exit={{ height: 0 }}
               transition={{ type: 'spring', stiffness: 320, damping: 34 }}
               className="overflow-hidden border-t border-ink-800 bg-ink-850"
             >
-              <div className="h-[42vh]">{mobileTab === 'layers' ? <LayersPanel /> : <PropertiesPanel />}</div>
+              <div className="h-[46vh]">{sideTab === 'layers' ? <LayersPanel embedded /> : <PropertiesPanel />}</div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -174,6 +164,7 @@ export function EditorPage() {
 
       <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} />
       <ImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
+      <ShortcutsDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
 
       {saveState === 'error' && (
         <div className="pointer-events-none absolute right-4 bottom-12 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs text-red-300">

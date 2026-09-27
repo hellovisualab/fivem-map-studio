@@ -1,4 +1,4 @@
-import { Crosshair, Grid3X3, Maximize, Minus, Plus } from 'lucide-react'
+import { Crosshair, Grid3X3, Keyboard, Magnet, Maximize, Minus, Plus } from 'lucide-react'
 import { useEditor } from '@/store/useEditor'
 import { canvasApi } from '@/lib/canvasApi'
 import { canvasToWorld } from '@/lib/geometry'
@@ -6,12 +6,13 @@ import { isInCayo } from '@/lib/cayo'
 import { cn, round } from '@/lib/utils'
 import { getData } from '@/lib/data'
 
-export function StatusBar() {
+export function StatusBar({ onHelp }: { onHelp: () => void }) {
   const pointer = useEditor((s) => s.pointer)
   const scale = useEditor((s) => s.viewport.scale)
   const doc = useEditor((s) => s.doc)
   const selectedCount = useEditor((s) => s.selectedIds.length)
-  const { updateDocument } = useEditor.getState()
+  const snap = useEditor((s) => s.snap)
+  const { updateDocument, setSnap } = useEditor.getState()
   const world = pointer && doc ? canvasToWorld(pointer.x, pointer.y, doc) : null
   const onCayo = !!doc?.cayoPerico && !!world && isInCayo(world.x, world.y)
 
@@ -53,6 +54,19 @@ export function StatusBar() {
         title="Toggle grid (G)"
       >
         <Grid3X3 className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Grid</span>
+      </button>
+
+      <button onClick={onHelp} className="hidden items-center gap-1 rounded-md px-2 py-1 text-ink-400 transition hover:bg-ink-800 hover:text-ink-200 sm:flex" title="Keyboard shortcuts (?)">
+        <Keyboard className="h-3.5 w-3.5" /> <span className="hidden lg:inline">Shortcuts</span>
+      </button>
+
+      <button
+        onClick={() => setSnap(!snap)}
+        aria-pressed={snap}
+        className={cn('flex items-center gap-1 rounded-md px-2 py-1 transition hover:bg-ink-800', snap ? 'text-brand-400' : 'text-ink-400')}
+        title="Smart guides & snapping (hold Alt while dragging to move freely)"
+      >
+        <Magnet className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Snap</span>
       </button>
 
       <div className="flex items-center gap-0.5 rounded-lg border border-ink-700 bg-ink-850 p-0.5">
