@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { useEditor } from '@/store/useEditor'
 import { canvasApi } from '@/lib/canvasApi'
 import { toast } from '@/components/ui/Toast'
-import { hasClipboard } from '@/lib/clipboard'
+import { arrangeSelection, copySelection, cutSelection, pasteClipboard } from '@/lib/editorActions'
 import { rotatePoint } from '@/lib/geometry'
 import type { ToolId } from '@/types'
 
@@ -20,23 +20,7 @@ const TOOL_KEYS: Record<string, ToolId> = {
 const isEditable = (t: EventTarget | null) =>
   t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || (t instanceof HTMLElement && t.isContentEditable)
 
-/** Replaces a screenshot left in the system clipboard, so Ctrl+V pastes the copied elements. */
-function markSystemClipboard(count: number) {
-  try {
-    void navigator.clipboard?.writeText(`LABSEVE7 map elements (${count})`).catch(() => {})
-  } catch {
-    /* clipboard API unavailable */
-  }
-}
-
-function pasteElements() {
-  const s = useEditor.getState()
-  if (!hasClipboard()) return
-  const n = s.paste(canvasApi.visibleRect())
-  if (n) toast.success(`Pasted ${n} element${n === 1 ? '' : 's'}`)
-}
-
-export function useShortcuts(opts: { onExport: () => void }) {
+export function useShortcuts(opts: { onExport: () => void; onHelp: () => void }) {
   useEffect(() => {
     // Ctrl+V: the paste event carries clipboard images (screenshots become image
     // elements); without one, the copied map elements are pasted.
@@ -47,7 +31,7 @@ export function useShortcuts(opts: { onExport: () => void }) {
       const files = Array.from(e.clipboardData?.files ?? []).filter((f) => /^image\/(png|jpe?g|webp)$/.test(f.type))
       e.preventDefault()
       if (files.length) void canvasApi.addImageFiles(files)
-      else pasteElements()
+      else pasteClipboard()
     }
     const onKey = (e: KeyboardEvent) => {
       const s = useEditor.getState()
@@ -77,18 +61,15 @@ export function useShortcuts(opts: { onExport: () => void }) {
       if (mod && (key === 'c' || key === 'x')) {
         if (!s.selectedIds.length || window.getSelection()?.toString()) return
         e.preventDefault()
-        const n = key === 'c' ? s.copySelected() : s.cutSelected()
-        if (n) {
-          markSystemClipboard(n)
-          toast.success(`${key === 'c' ? 'Copied' : 'Cut'} ${n} element${n === 1 ? '' : 's'}`)
-        }
+        if (key === 'c') copySelection()
+        else cutSelection()
         return
       }
       if (mod && key === 'v') {
         // Browsers that don't fire `paste` outside text fields still paste elements.
         pasteHandled = false
         window.setTimeout(() => {
-          if (!pasteHandled) pasteElements()
+          if (!pasteHandled) pasteClipboard()
         }, 0)
         return
       }
@@ -123,6 +104,11 @@ export function useShortcuts(opts: { onExport: () => void }) {
         return
       }
       if (mod) return
+      if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+        e.preventDefault()
+        opts.onHelp()
+        return
+      }
 
       switch (key) {
         case 'delete':
@@ -170,10 +156,14 @@ export function useShortcuts(opts: { onExport: () => void }) {
           if (e.shiftKey) canvasApi.fit()
           return
         case '[':
-          if (s.selectedIds.length === 1) s.moveLayer(s.selectedIds[0], e.shiftKey ? 'bottom' : 'down')
+        case '{':
+          if (e.shiftKey) arrangeSelection('bottom')
+          else if (s.selectedIds.length === 1) s.moveLayer(s.selectedIds[0], 'down')
           return
         case ']':
-          if (s.selectedIds.length === 1) s.moveLayer(s.selectedIds[0], e.shiftKey ? 'top' : 'up')
+        case '}':
+          if (e.shiftKey) arrangeSelection('top')
+          else if (s.selectedIds.length === 1) s.moveLayer(s.selectedIds[0], 'up')
           return
         case 'arrowup':
         case 'arrowdown':

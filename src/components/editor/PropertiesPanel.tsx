@@ -1,6 +1,6 @@
 import { useId, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Copy, Grid3X3, LocateFixed, PenTool, Pipette, RotateCcw, Sparkles, Trash2, TreePalm, Upload } from 'lucide-react'
+import { ChevronRight, Copy, Grid3X3, LocateFixed, PenTool, Pipette, RotateCcw, Sparkles, Trash2, TreePalm, Upload } from 'lucide-react'
 import { useEditor } from '@/store/useEditor'
 import { useAuth } from '@/store/useAuth'
 import { DEFAULT_WORLD, FONTS, MARKER_ICONS, PALETTE, STYLE_PRESETS, TEXT_PRESETS, ZONE_TYPES } from '@/lib/constants'
@@ -83,14 +83,74 @@ function Slider({ value, onChange, min, max, step = 0.01 }: { value: number; onC
   return <input type="range" className="w-full" min={min} max={max} step={step} value={value} onChange={(e) => onChange(parseFloat(e.target.value))} />
 }
 
-function Section({ title, children, action }: { title: string; children: ReactNode; action?: ReactNode }) {
+const SECTIONS_KEY = 'labseve7:sections'
+
+function readSections(): Record<string, boolean> {
+  try {
+    return JSON.parse(localStorage.getItem(SECTIONS_KEY) ?? '{}') as Record<string, boolean>
+  } catch {
+    return {}
+  }
+}
+
+/** Collapsible panel section; each section remembers whether it was left open. */
+function Section({
+  title,
+  children,
+  action,
+  defaultOpen = true,
+  collapsible = true,
+}: {
+  title: string
+  children: ReactNode
+  action?: ReactNode
+  defaultOpen?: boolean
+  collapsible?: boolean
+}) {
+  const [open, setOpen] = useState(() => !collapsible || (readSections()[title] ?? defaultOpen))
+  const bodyId = useId()
+  const toggle = () => {
+    const next = !open
+    setOpen(next)
+    try {
+      localStorage.setItem(SECTIONS_KEY, JSON.stringify({ ...readSections(), [title]: next }))
+    } catch {
+      /* preference only */
+    }
+  }
   return (
-    <div className="border-b border-ink-700/60 px-3 py-3 last:border-b-0">
-      <div className="mb-2 flex items-center justify-between">
-        <p className="text-[11px] font-semibold tracking-wider text-ink-500 uppercase">{title}</p>
+    <div className="border-b border-ink-700/60 px-3 py-2.5 last:border-b-0">
+      <div className="flex min-h-7 items-center justify-between gap-2">
+        {collapsible ? (
+          <button
+            type="button"
+            onClick={toggle}
+            aria-expanded={open}
+            aria-controls={bodyId}
+            className="-ml-1 flex flex-1 items-center gap-1.5 rounded-md px-1 py-1 text-left text-[11px] font-semibold tracking-wider text-ink-400 uppercase transition hover:text-ink-200"
+          >
+            <ChevronRight className={cn('h-3.5 w-3.5 shrink-0 text-ink-500 transition-transform', open && 'rotate-90')} />
+            {title}
+          </button>
+        ) : (
+          <p className="text-[11px] font-semibold tracking-wider text-ink-500 uppercase">{title}</p>
+        )}
         {action}
       </div>
-      <div className="space-y-2.5">{children}</div>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            id={bodyId}
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="overflow-hidden"
+          >
+            <div className="space-y-2.5 pt-1.5 pb-1">{children}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
@@ -195,7 +255,7 @@ function MapStyleSections() {
         <p className="text-[11px] text-ink-500">Presets set the grading, tint, gradient and glow below. Tweak anything afterwards.</p>
       </Section>
 
-      <Section title="Color grading">
+      <Section title="Color grading" defaultOpen={false}>
         <Field label={`Brightness · ${pct(style.brightness)}`}>
           <Slider value={style.brightness} min={0.2} max={1.8} onChange={(v) => set({ brightness: v })} />
         </Field>
@@ -214,7 +274,7 @@ function MapStyleSections() {
         <Toggle checked={style.invert} onChange={(v) => set({ invert: v })} label="Invert colors" />
       </Section>
 
-      <Section title="Color tint">
+      <Section title="Color tint" defaultOpen={false}>
         <Field label="Color">
           <ColorInput value={style.tint} onChange={(v) => set({ tint: v })} />
         </Field>
@@ -228,7 +288,7 @@ function MapStyleSections() {
         </div>
       </Section>
 
-      <Section title="Gradient overlay" action={<Toggle checked={style.gradient.enabled} onChange={(v) => setGradient({ enabled: v })} label="" />}>
+      <Section title="Gradient overlay" defaultOpen={false} action={<Toggle checked={style.gradient.enabled} onChange={(v) => setGradient({ enabled: v })} label="" />}>
         {style.gradient.enabled && (
           <>
             <div className="h-3 w-full rounded-full" style={{ background: `linear-gradient(${style.gradient.angle}deg, ${style.gradient.from}, ${style.gradient.to})` }} />
@@ -261,7 +321,7 @@ function MapStyleSections() {
         )}
       </Section>
 
-      <Section title="Outer glow" action={<Toggle checked={style.glow.enabled} onChange={(v) => setGlow({ enabled: v })} label="" />}>
+      <Section title="Outer glow" defaultOpen={false} action={<Toggle checked={style.glow.enabled} onChange={(v) => setGlow({ enabled: v })} label="" />}>
         {style.glow.enabled && (
           <>
             <Field label="Color">
@@ -285,7 +345,7 @@ function MapStyleSections() {
         )}
       </Section>
 
-      <Section title="Sea & background">
+      <Section title="Sea & background" defaultOpen={false}>
         <Toggle checked={style.keyColor !== null} onChange={(v) => set({ keyColor: v ? style.keyColor ?? '#0a0a0c' : null })} label="Remove sea (color key)" />
         {style.keyColor !== null && (
           <>
@@ -323,7 +383,7 @@ function EffectsSection({ el }: { el: MapElement }) {
   const set = (patch: Partial<ElementEffects>) => updateElement(el.id, { effects: { ...el.effects, ...patch } })
   const clippable = el.type === 'image' || el.type === 'zone' || el.type === 'text'
   return (
-    <Section title="Effects">
+    <Section title="Effects" defaultOpen={false}>
       <Field label="Blend mode">
         <BlendSelect value={fx.blend} onChange={(v) => set({ blend: v })} />
       </Field>
@@ -475,7 +535,7 @@ function MapSettings() {
       </Section>
       <MapStyleSections />
       <OverlayFxSection />
-      <Section title="Grid">
+      <Section title="Grid" defaultOpen={false}>
         <div className="flex items-center justify-between">
           <span className="flex items-center gap-2 text-xs text-ink-300">
             <Grid3X3 className="h-3.5 w-3.5" /> Show grid
@@ -851,7 +911,7 @@ function ElementSettings({ el }: { el: MapElement }) {
 
       <EffectsSection el={el} />
 
-      <Section title="Actions">
+      <Section title="Actions" collapsible={false}>
         {(el.type === 'zone' || el.type === 'line') && (
           <Button
             variant={pointEditing ? 'primary' : 'secondary'}

@@ -15,6 +15,7 @@ A visual minimap editor for FiveM (GTA V) servers. Design custom minimaps in the
 - **Point editing** – double-click a zone or line (or press `Enter`) to drag its points, drag an edge's middle dot to add one, `Alt+click` / `Delete` to remove one; points snap to other zones' corners and edges so neighbouring territories share borders
 - **Smart guides & snapping** – moving elements snaps their edges and centres to other elements and the map frame (pink guides), or to the grid; toggle *Snap* in the status bar, hold `Alt` to move freely
 - **Copy / paste** – `Ctrl+C` / `Ctrl+X` / `Ctrl+V`, also between projects and tabs; pasting a screenshot from the clipboard adds it as an image
+- **Easy-to-use workspace** – one side panel with *Design* and *Layers* tabs, collapsible property sections that remember their state, a floating quick-action bar above the selection (edit points, duplicate, copy, front / back, lock, delete), a right-click menu, a *Start your map* card on empty projects, hints for the active tool and a shortcuts sheet (`?`)
 - **Layers panel** – show/hide, lock, drag to reorder, bring forward / send backward, search
 - **Map styles & effects (Photoshop-like)**
   - One-click style presets: Clean, Neon Purple, Inferno, Blood, Ice, Miami, Gold, Noir, Toxic
@@ -54,7 +55,9 @@ A visual minimap editor for FiveM (GTA V) servers. Design custom minimaps in the
 | `Alt` while dragging | Move without snapping |
 | `G` | Toggle grid |
 | `+` / `-` / `Ctrl+0` / `Shift+1` | Zoom in / out / 100% / fit |
-| `[` / `]` (`Shift` = to back / front) | Reorder layer |
+| `[` / `]` (`Shift` = to back / front) | Reorder layer (`Shift` works on the whole selection) |
+| `?` | Keyboard shortcuts sheet |
+| Right-click | Context menu for the selection or the map |
 | Arrow keys (`Shift` = 10px) | Nudge selection (or the selected point) |
 | `Space` + drag / middle mouse | Pan |
 

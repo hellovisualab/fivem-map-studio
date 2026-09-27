@@ -67,7 +67,7 @@ function ToolButton({
       )}
     >
       {children}
-      <span className="pointer-events-none absolute left-full ml-3 hidden whitespace-nowrap rounded-md border border-ink-700 bg-ink-900 px-2 py-1 text-xs text-ink-100 opacity-0 shadow-soft transition group-hover:opacity-100 lg:block">
+      <span className="pointer-events-none absolute left-full ml-3 hidden whitespace-nowrap rounded-md border border-ink-700 bg-ink-900 px-2 py-1 text-xs text-ink-100 opacity-0 shadow-soft transition group-hover:opacity-100 md:block">
         {label}
         {shortcut && <kbd className="ml-2 rounded bg-ink-700 px-1 text-[10px] text-ink-300">{shortcut}</kbd>}
       </span>

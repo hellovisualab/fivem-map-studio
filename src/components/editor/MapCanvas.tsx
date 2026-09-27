@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import Konva from 'konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import { Circle, Group, Image as KImage, Layer, Line, Rect, Shape, Stage, Transformer } from 'react-konva'
@@ -22,10 +22,20 @@ import { overlayFxOf } from '@/lib/overlayFx'
 import { ElementNode, type NodeHandlers } from './nodes'
 import { OverlayFxPreview } from './OverlayFxPreview'
 import { PointEditor } from './PointEditor'
+import { SelectionBar } from './SelectionBar'
+import { ContextMenu } from './ContextMenu'
+import { QuickStart } from './QuickStart'
 
 type Draft =
   | { kind: 'rect'; x0: number; y0: number; x1: number; y1: number }
   | { kind: 'poly'; points: number[]; cursor: { x: number; y: number } | null }
+
+const TOOL_HINTS: Partial<Record<string, string>> = {
+  zone: 'Drag on the map to draw a zone',
+  text: 'Click on the map to place a label',
+  marker: 'Click on the map to drop a marker',
+  color: 'Click any element to paint it',
+}
 
 const applyColor = (el: MapElement, color: string): Partial<MapElement> => {
   switch (el.type) {
@@ -70,6 +80,9 @@ export function MapCanvas() {
     targets: SnapBox[]
   } | null>(null)
   const [guides, setGuides] = useState<Guide[]>([])
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const closeMenu = useCallback(() => setMenu(null), [])
+  const barRef = useRef<HTMLDivElement>(null)
   // Pointer at the last press (document pixels): drags measure from here, since
   // Konva only reports dragstart after the pointer has already moved a bit.
   const pressRef = useRef<{ x: number; y: number } | null>(null)
@@ -432,6 +445,53 @@ export function MapCanvas() {
     if (files.length) await addImageFiles(files)
   }
 
+  const onContextMenu = (e: KonvaEventObject<PointerEvent>) => {
+    e.evt.preventDefault()
+    const st = useEditor.getState()
+    if (canvasApi.hasDraft()) canvasApi.cancelDraft()
+    // The element under the pointer (shapes sit inside groups named "element").
+    let node: Konva.Node | null = e.target
+    while (node && node !== stageRef.current && !node.hasName('element')) node = node.getParent()
+    const id = node && node !== stageRef.current ? node.id() : null
+    const onHandle = e.target.hasName('point-handle') || e.target.hasName('point-insert')
+    if (id) {
+      if (!st.selectedIds.includes(id)) select([id])
+    } else if (!onHandle) {
+      clearSelection()
+    }
+    if (st.tool !== 'select') setTool('select')
+    setMenu({ x: e.evt.clientX, y: e.evt.clientY })
+  }
+
+  // Keep the quick-action bar just above the selection (below it near the top edge).
+  useLayoutEffect(() => {
+    const bar = barRef.current
+    const stage = stageRef.current
+    if (!bar || !stage) return
+    const st = useEditor.getState()
+    const nodes = st.selectedIds.map((id) => nodeRefs.current.get(id)).filter((n): n is Konva.Node => !!n && n.isVisible())
+    if (!nodes.length || dragRef.current || st.tool !== 'select' || editingText) {
+      bar.style.visibility = 'hidden'
+      return
+    }
+    const boxes = nodes.map((n) => n.getClientRect({ relativeTo: stage, skipShadow: true }))
+    const vp = st.viewport
+    const x0 = Math.min(...boxes.map((b) => b.x)) * vp.scale + vp.x
+    const x1 = Math.max(...boxes.map((b) => b.x + b.width)) * vp.scale + vp.x
+    const y0 = Math.min(...boxes.map((b) => b.y)) * vp.scale + vp.y
+    const y1 = Math.max(...boxes.map((b) => b.y + b.height)) * vp.scale + vp.y
+    const w = bar.offsetWidth
+    const h = bar.offsetHeight
+    // Clear the transformer's rotate handle above the box.
+    const gap = st.pointEditId ? 14 : 44
+    let top = y0 - gap - h
+    if (top < 56) top = y1 + 14
+    const left = Math.max(8, Math.min(size.w - w - 8, (x0 + x1) / 2 - w / 2))
+    bar.style.left = `${left}px`
+    bar.style.top = `${Math.min(top, size.h - h - 8)}px`
+    bar.style.visibility = 'visible'
+  })
+
   const handlers: NodeHandlers = useMemo(
     () => ({
       draggable: tool === 'select',
@@ -643,6 +703,7 @@ export function MapCanvas() {
           onTap={onStageClick}
           onDblClick={onDblClick}
           onDblTap={onDblClick}
+          onContextMenu={onContextMenu}
         >
           {/*
             Base map. Draw order matters for the Photoshop-style effects:
@@ -787,6 +848,9 @@ export function MapCanvas() {
         </Stage>
       )}
       <OverlayFxPreview fx={overlayFx} />
+      <SelectionBar ref={barRef} />
+      {menu && <ContextMenu x={menu.x} y={menu.y} onClose={closeMenu} />}
+      {doc.elements.length === 0 && tool === 'select' && !draft && <QuickStart />}
 
       {editingText && (
         <textarea
@@ -815,13 +879,18 @@ export function MapCanvas() {
       )}
 
       {pointEditShape && (
-        <div className="pointer-events-none absolute top-3 left-1/2 max-w-[92%] -translate-x-1/2 rounded-full border border-ink-700 bg-ink-900/90 px-3 py-1.5 text-center text-xs text-ink-300 backdrop-blur">
+        <div className="pointer-events-none absolute top-[72px] left-1/2 max-w-[92%] -translate-x-1/2 rounded-2xl md:top-3 md:rounded-full border border-ink-700 bg-ink-900/90 px-3 py-1.5 text-center text-xs text-ink-300 backdrop-blur">
           Editing points · drag a point (snaps to other zones; <span className="text-ink-100">Alt</span> = free) · drag an edge's middle dot to add one ·{' '}
           <span className="text-ink-100">Alt+click</span> / <span className="text-ink-100">Delete</span> removes · <span className="text-ink-100">Esc</span> to finish
         </div>
       )}
+      {(tool === 'zone' || tool === 'text' || tool === 'marker' || tool === 'color') && !draft && (
+        <div className="pointer-events-none absolute top-[72px] left-1/2 max-w-[92%] -translate-x-1/2 rounded-2xl text-center md:top-3 md:rounded-full border border-ink-700 bg-ink-900/90 px-3 py-1.5 text-xs text-ink-300 backdrop-blur">
+          {TOOL_HINTS[tool]} · <span className="text-ink-100">Esc</span> to go back to Select
+        </div>
+      )}
       {(tool === 'polygon' || tool === 'line') && (
-        <div className="pointer-events-none absolute top-3 left-1/2 -translate-x-1/2 rounded-full border border-ink-700 bg-ink-900/90 px-3 py-1.5 text-xs text-ink-300 backdrop-blur">
+        <div className="pointer-events-none absolute top-[72px] left-1/2 max-w-[92%] -translate-x-1/2 rounded-2xl text-center md:top-3 md:rounded-full border border-ink-700 bg-ink-900/90 px-3 py-1.5 text-xs text-ink-300 backdrop-blur">
           Click to add points · <span className="text-ink-100">Enter</span> or double-click to finish · <span className="text-ink-100">Esc</span> to cancel
         </div>
       )}

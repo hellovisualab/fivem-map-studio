@@ -5,6 +5,8 @@ import { cloneElement, normalizeDocument } from '@/lib/elements'
 import { debounce } from '@/lib/utils'
 import { copyElements, takePaste } from '@/lib/clipboard'
 
+export type SideTab = 'design' | 'layers'
+
 export type SaveState = 'saved' | 'saving' | 'unsaved' | 'error' | 'idle'
 
 export interface Viewport {
@@ -29,7 +31,9 @@ interface EditorState {
   zoneType: ZoneType
   markerIcon: MarkerIcon
   paintColor: string
-  panels: { layers: boolean; properties: boolean; toolbar: boolean }
+  /** Right-hand panel: open or not, and which tab. */
+  sidePanel: boolean
+  sideTab: SideTab
   /** Smart guides + magnetic snapping while moving elements and points. */
   snap: boolean
   /** Zone or line whose points are being edited (vertex handles instead of the transformer). */
@@ -46,7 +50,9 @@ interface EditorState {
   setPaintColor: (c: string) => void
   setViewport: (v: Partial<Viewport>) => void
   setPointer: (p: { x: number; y: number } | null) => void
-  togglePanel: (p: keyof EditorState['panels']) => void
+  /** Opens the side panel on `tab`, or closes it when that tab is already showing. */
+  toggleSide: (tab: SideTab) => void
+  setSideTab: (tab: SideTab) => void
   setThumbnailProvider: (fn: (() => Promise<string | undefined>) | null) => void
   setSnap: (on: boolean) => void
   setPointEdit: (id: string | null) => void
@@ -125,7 +131,8 @@ export const useEditor = create<EditorState>((set, get) => {
     zoneType: 'gang',
     markerIcon: 'police',
     paintColor: '#ec4899',
-    panels: { layers: true, properties: true, toolbar: true },
+    sidePanel: true,
+    sideTab: 'design',
     snap: loadSnap(),
     pointEditId: null,
     activeVertex: null,
@@ -157,7 +164,8 @@ export const useEditor = create<EditorState>((set, get) => {
     setPaintColor: (paintColor) => set({ paintColor }),
     setViewport: (v) => set((s) => ({ viewport: { ...s.viewport, ...v } })),
     setPointer: (pointer) => set({ pointer }),
-    togglePanel: (p) => set((s) => ({ panels: { ...s.panels, [p]: !s.panels[p] } })),
+    toggleSide: (tab) => set((s) => (s.sidePanel && s.sideTab === tab ? { sidePanel: false } : { sidePanel: true, sideTab: tab })),
+    setSideTab: (sideTab) => set({ sideTab, sidePanel: true }),
     setThumbnailProvider: (fn) => set({ thumbnailProvider: fn }),
     setSnap: (snap) => {
       try {
