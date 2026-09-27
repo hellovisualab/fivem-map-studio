@@ -20,14 +20,14 @@ A visual minimap editor for FiveM (GTA V) servers. Design custom minimaps in the
   - Outer glow / aura around the island silhouette, with color, size, density and opacity
   - Sea removal by color key for opaque textures, and transparent background for alpha exports
   - Per-element effects: blend mode, drop shadow / glow, and **clip to map shape** (flags, textures and zones masked to the island)
-- **Radar overlay effects** – neon glow, radar sweep, sonar ping, scanlines, pulse, heartbeat (ECG), breathe, glass shine, vignette, hue cycle, flicker and glitch, previewed on an in-game HUD mock-up and exported as a NUI page that sits exactly on the radar
+- **Radar overlay effects** – neon glow, radar sweep, sonar ping, scanlines, pulse, heartbeat (ECG), breathe, glass shine, vignette, hue cycle, flicker and glitch on the minimap, the expanded radar and the full-screen pause-menu blip map, previewed on in-game mock-ups of each and exported as a NUI page that follows whichever map is on screen
 - **Elements**
   - Text: content, size, 20 fonts (Bebas Neue, Anton, Bangers, Permanent Marker, Great Vibes, Cinzel…), style, letter spacing, uppercase, color, outline, shadow, rotation, quick styles
   - Zones: gang / police / safe / custom with color, transparency, border, name, description
   - Images: PNG / JPG / WebP with scale, rotate, move
   - Lines: width, dashed, arrow head
   - Markers: police, hospital, bank, shop, garage, custom icon → mapped to FiveM blip sprites
-- **Export FiveM Resource** – generates `fxmanifest.lua`, `client.lua`, `server.lua`, `config/` (Lua + JSON positions in world coordinates), `stream/` (full texture + 2×3 `minimap_sea_R_C.png` tiles named like the vanilla textures) and an optional `html/` NUI page that animates the chosen effects over the in-game radar, zipped for download
+- **Export FiveM Resource** – generates `fxmanifest.lua`, `client.lua`, `server.lua`, `config/` (Lua + JSON positions in world coordinates), `stream/` (full texture + 2×3 `minimap_sea_R_C.png` tiles named like the vanilla textures) and an optional `html/` NUI page that animates the chosen effects over the in-game minimap, expanded radar and pause-menu map, zipped for download
 - **Import** – PNG / JPG / WebP / DDS (DXT1/3/5 decoded in-browser) frames, split tiles (`*_X_Y.*` auto-stitched) and ZIP archives
 - **Autosave** on every change (debounced), `Ctrl+S` manual save, `beforeunload` guard
 - **Plans** – Free (1 export / day) and Supporter (unlimited); limits enforced in the export dialog
@@ -106,7 +106,7 @@ src/
 ```
 <name>/
 ├─ fxmanifest.lua
-├─ client.lua            zone + marker blips, radar overlay driver, /minimapoverlay
+├─ client.lua            zone + marker blips, map overlay driver, /minimapoverlay
 ├─ server.lua
 ├─ config/
 │  ├─ config.lua         Config.Zones / Config.Markers / Config.Labels (vector2/vector3)
@@ -117,7 +117,7 @@ src/
 │  ├─ minimap_sea_0_0.png … minimap_sea_2_1.png
 │  ├─ cayo_perico.png    only when the project includes Cayo Perico
 │  └─ README.txt         how to pack each PNG into its minimap_sea_R_C.ytd with OpenIV
-└─ html/                 optional radar overlay: index.html · overlay.js · script.js · style.css
+└─ html/                 optional map overlay: index.html · overlay.js · script.js · style.css
 ```
 
 Browsers cannot write `.ytd` texture dictionaries, so the exporter ships ready-to-pack PNG tiles plus instructions.
@@ -126,7 +126,13 @@ Pixel ↔ world conversion uses the vanilla minimap grid from `minimap.ymt`: six
 
 ### Radar overlay
 
-The effects are painted by one plain-JS runtime (`src/lib/overlayRuntime.js`) that both the editor preview and the exported `html/overlay.js` run, so the preview matches the game. In FiveM, `client.lua` computes the radar rectangle from the screen resolution and safe zone (radar size as measured by [fivem-minimap-anchor](https://github.com/glitchdetector/fivem-minimap-anchor); on screens wider than 16:9 the HUD stays in a centred 16:9 area) and sends it to the NUI page, which draws the effects on a canvas right over the radar at 30 fps. The overlay hides with the pause menu, the expanded map, a hidden HUD or radar, and can be toggled per player with `/minimapoverlay`. Everything is configurable in `Config.Overlay` (effects, intensity, speed, color, and an `Adjust` offset for servers that move the radar).
+The effects are painted by one plain-JS runtime (`src/lib/overlayRuntime.js`) that both the editor preview and the exported `html/overlay.js` run, so the preview matches the game. They play on three maps, each switchable in the editor (*Plays on*) and in `Config.Overlay` (`Radar`, `Bigmap`, `PauseMap`):
+
+- **Minimap** – the radar in the bottom-left corner (size as measured by [fivem-minimap-anchor](https://github.com/glitchdetector/fivem-minimap-anchor)).
+- **Expanded radar** – the bigger radar shown while `IsBigmapActive` (Z in GTA Online; size as used by [Boost-DynamicHud](https://github.com/boostless/Boost-DynamicHud)).
+- **Pause map** – the full-screen blip map on the pause menu's MAP tab. Where the game reports the map page's context (`MAP_CanZoom`) the effects hide on the other tabs; otherwise they stay while the pause menu is open.
+
+Every 150 ms `client.lua` works out which map is on screen, computes its rectangle from the screen resolution and safe zone (on screens wider than 16:9 the HUD stays in a centred 16:9 area) and sends it to the NUI page, which draws the effects on a canvas right over that map at 30 fps. The overlay hides with a hidden HUD or radar, player switches and screen fades, and can be toggled per player with `/minimapoverlay`. Everything is configurable in `Config.Overlay` (maps, effects, intensity, speed, color, and an `Adjust` offset for servers that move the radar). The NUI page draws on top of the game's maps; it cannot recolour the map pixels themselves.
 
 ### Cayo Perico
 

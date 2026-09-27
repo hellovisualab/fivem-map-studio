@@ -8,7 +8,7 @@ import { toast } from '@/components/ui/Toast'
 import { useEditor } from '@/store/useEditor'
 import { useAuth } from '@/store/useAuth'
 import { exportFiveMResource, buildPositions } from '@/lib/exporter'
-import { overlayFxOf, OVERLAY_FX_BY_ID } from '@/lib/overlayFx'
+import { FX_SURFACES, overlayFxOf, OVERLAY_FX_BY_ID } from '@/lib/overlayFx'
 import { CAYO_PERICO } from '@/lib/cayo'
 import { getData } from '@/lib/data'
 import { downloadBlob, slugify, uid } from '@/lib/utils'
@@ -42,7 +42,8 @@ export function ExportDialog({ open, onClose }: { open: boolean; onClose: () => 
   const overlayFx = overlayFxOf(doc)
   const fxSummary = overlayFx.ids.map((id) => OVERLAY_FX_BY_ID[id].label).join(', ')
   // The overlay only exists to play the effects; without any there is nothing to export.
-  const hasFx = overlayFx.ids.length > 0
+  const surfaces = FX_SURFACES.filter((s) => overlayFx.targets?.[s.id] !== false).map((s) => s.label.toLowerCase())
+  const hasFx = overlayFx.ids.length > 0 && surfaces.length > 0
   const withOverlay = includeHtml && hasFx
   const locked = remaining !== null && remaining <= 0
 
@@ -133,7 +134,7 @@ export function ExportDialog({ open, onClose }: { open: boolean; onClose: () => 
               {
                 k: 'html',
                 label: 'Animated radar overlay (html/)',
-                desc: hasFx ? `${fxSummary} over the in-game radar · /minimapoverlay` : 'Pick overlay effects under Map settings first',
+                desc: hasFx ? `${fxSummary} on the ${surfaces.join(', ')} · /minimapoverlay` : 'Pick overlay effects and where they play under Map settings first',
                 v: withOverlay,
                 set: setIncludeHtml,
                 disabled: !hasFx,

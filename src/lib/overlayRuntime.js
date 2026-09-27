@@ -4,8 +4,8 @@
 
 const TAU = Math.PI * 2
 
-/** Room kept around the radar for outer glows, as a fraction of the radar height. */
-export const FX_BLEED = 0.3
+/** Room kept around a surface for outer glows, in effect units (see `surfaceUnit`). */
+export const FX_BLEED_UNITS = 30
 
 /**
  * Screen rectangle of the vanilla radar, in pixels. Radar size measured by
@@ -14,12 +14,39 @@ export const FX_BLEED = 0.3
  * screens wider than 16:9 the HUD stays inside a centred 16:9 area.
  */
 export function minimapRect(resX, resY, safeZone) {
+  return hudCorner(resX, resY, safeZone, resY / 4, resY / 5.674)
+}
+
+/**
+ * The expanded radar (IS_BIGMAP_ACTIVE, Z in GTA Online): same corner, height / 2.52
+ * wide and height / 2.3374 tall, as measured by Boost-DynamicHud.
+ */
+export function bigmapRect(resX, resY, safeZone) {
+  return hudCorner(resX, resY, safeZone, resY / 2.52, resY / 2.3374)
+}
+
+/** The full-screen pause menu map, inset by the safe zone (at least 1.5% of the height). */
+export function pauseMapRect(resX, resY, safeZone) {
+  const margin = (1 - safeZone) * 0.5
+  const ix = Math.max(resX * margin, resY * 0.015)
+  const iy = Math.max(resY * margin, resY * 0.015)
+  return { x: ix, y: iy, w: resX - ix * 2, h: resY - iy * 2 }
+}
+
+function hudCorner(resX, resY, safeZone, w, h) {
   const margin = (1 - safeZone) * 0.5
   const hudW = Math.min(resX, (resY * 16) / 9)
   const hudX = (resX - hudW) / 2
-  const w = resY / 4
-  const h = resY / 5.674
   return { x: hudX + hudW * margin, y: resY * (1 - margin) - h, w, h }
+}
+
+/**
+ * Pixel size of one effect unit on a surface: 1% of the radar height, so lines and
+ * glows keep the radar's weight; the larger maps get 1.6× that.
+ */
+export function surfaceUnit(surface, resY) {
+  const radar = resY / 5.674 / 100
+  return surface === 'radar' ? radar : radar * 1.6
 }
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
@@ -110,20 +137,22 @@ function flickerAmount(t, intensity) {
 const glitchActive = (t) => (t % 2.4) / 2.4 > 0.82
 
 /**
- * Paints the selected effects over a radar occupying `r` ({ x, y, w, h } in canvas
- * pixels). Inner effects are clipped to the radar; frame effects bleed around it.
+ * Paints the selected effects over a map surface occupying `r` ({ x, y, w, h } in
+ * canvas pixels): the radar, the expanded radar or the pause menu map. Inner
+ * effects are clipped to it; frame effects bleed around it.
  *
  * @param fx { ids: string[], intensity: 0–1, speed: 0.25–3, color: '#rrggbb' }
  * @param seconds Elapsed wall-clock time; the speed setting is applied here.
+ * @param unit Pixels per effect unit (line widths, glows); 1% of `r.h` by default.
  */
-export function paintRadarFx(ctx, fx, seconds, r) {
+export function paintRadarFx(ctx, fx, seconds, r, unit) {
   const ids = (fx && fx.ids) || []
   if (!ids.length || !(r.w >= 4) || !(r.h >= 4)) return
   const on = (id) => ids.indexOf(id) >= 0
   const I = clamp(Number(fx.intensity) || 0, 0, 1)
   // Frame timestamps can predate the caller's start time by a frame; never run backwards.
   const t = Math.max(0, Number(seconds) || 0) * clamp(Number(fx.speed) || 1, 0.25, 3)
-  const u = r.h / 100
+  const u = unit > 0 ? unit : r.h / 100
   let base = hexRgb(fx.color)
   if (on('hue')) base = rotateHue(base, (t * 45) % 360)
   const light = mix(base, WHITE, 0.6)
@@ -224,17 +253,33 @@ export function paintRadarFx(ctx, fx, seconds, r) {
       ctx.arc(cx, cy, r.h * k * 1.1, 0, TAU)
       ctx.stroke()
     }
-    // Fading trail behind the beam, drawn as thin wedges (no conic gradients needed).
-    const steps = 30
+    // Fading trail behind the beam: a conic gradient where the browser has one,
+    // otherwise nested wedges that all end at the beam (no seams on big maps).
     const trail = 1.3
-    for (let i = 0; i < steps; i++) {
-      const k = 1 - i / steps
-      ctx.fillStyle = rgba(base, (0.06 + 0.36 * I) * k * k)
+    const peak = 0.06 + 0.36 * I
+    if (typeof ctx.createConicGradient === 'function') {
+      const g = ctx.createConicGradient(a - trail, cx, cy)
+      const f = trail / TAU
+      for (const k of [0, 0.25, 0.5, 0.75, 1]) g.addColorStop(f * k, rgba(base, peak * k * k))
+      g.addColorStop(Math.min(1, f + 0.0005), rgba(base, 0))
+      g.addColorStop(1, rgba(base, 0))
+      ctx.fillStyle = g
       ctx.beginPath()
-      ctx.moveTo(cx, cy)
-      ctx.arc(cx, cy, R, a - ((i + 1) * trail) / steps, a - (i * trail) / steps + 0.004)
-      ctx.closePath()
+      ctx.arc(cx, cy, R, 0, TAU)
       ctx.fill()
+    } else {
+      const steps = Math.round(clamp(R / 12, 24, 90))
+      // Each wedge adds the difference between neighbouring levels of the k² falloff.
+      for (let i = steps; i > 0; i--) {
+        const k = i / steps
+        const step = peak * (k * k - ((i - 1) / steps) ** 2)
+        ctx.fillStyle = rgba(base, step / Math.max(0.001, 1 - peak * ((i - 1) / steps) ** 2))
+        ctx.beginPath()
+        ctx.moveTo(cx, cy)
+        ctx.arc(cx, cy, R, a - (1 - (i - 1) / steps) * trail, a)
+        ctx.closePath()
+        ctx.fill()
+      }
     }
     ctx.save()
     ctx.shadowColor = rgba(base, 0.95)

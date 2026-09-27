@@ -1,4 +1,4 @@
-import type { MapDocument, OverlayFx, OverlayFxId } from '@/types'
+import type { MapDocument, OverlayFx, OverlayFxId, OverlayFxTargets } from '@/types'
 
 export interface OverlayFxDef {
   id: OverlayFxId
@@ -7,12 +7,22 @@ export interface OverlayFxDef {
   usesColor?: boolean
 }
 
+export const DEFAULT_FX_TARGETS: OverlayFxTargets = { radar: true, bigmap: true, pause: true }
+
 export const DEFAULT_OVERLAY_FX: OverlayFx = {
   ids: [],
+  targets: { ...DEFAULT_FX_TARGETS },
   intensity: 0.7,
   speed: 1,
   color: '#ec4899',
 }
+
+/** Surfaces in the order the editor lists them. */
+export const FX_SURFACES: { id: keyof OverlayFxTargets; label: string; short: string; blurb: string }[] = [
+  { id: 'radar', label: 'Minimap', short: 'Minimap', blurb: 'The radar in the corner' },
+  { id: 'bigmap', label: 'Expanded radar', short: 'Bigmap', blurb: 'Big radar (Z in GTA Online)' },
+  { id: 'pause', label: 'Pause map', short: 'Pause map', blurb: 'Full-screen blip map' },
+]
 
 /** Effects painted over the in-game radar by the exported NUI page (see overlayRuntime.js). */
 export const OVERLAY_FX_BY_ID: Record<OverlayFxId, OverlayFxDef> = {
@@ -46,8 +56,14 @@ export function overlayFxOf(doc: Pick<MapDocument, 'overlayFx'> | null | undefin
   const raw = doc?.overlayFx
   const ids = (raw?.ids ?? []).filter(isOverlayFxId)
   const ordered = OVERLAY_FX.map((f) => f.id).filter((id) => ids.includes(id))
+  const targets = raw?.targets
   return {
     ids: ordered,
+    targets: {
+      radar: targets?.radar ?? true,
+      bigmap: targets?.bigmap ?? true,
+      pause: targets?.pause ?? true,
+    },
     intensity: clamp(raw?.intensity ?? DEFAULT_OVERLAY_FX.intensity, 0, 1),
     speed: clamp(raw?.speed ?? DEFAULT_OVERLAY_FX.speed, 0.25, 3),
     color: sanitizeFxColor(raw?.color ?? DEFAULT_OVERLAY_FX.color),

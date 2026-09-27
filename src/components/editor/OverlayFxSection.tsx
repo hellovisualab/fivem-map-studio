@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react'
 import { Sparkles } from 'lucide-react'
 import { useEditor } from '@/store/useEditor'
-import { OVERLAY_FX, overlayFxOf, overlayFxUsesColor, toggleOverlayFx } from '@/lib/overlayFx'
+import { FX_SURFACES, OVERLAY_FX, overlayFxOf, overlayFxUsesColor, toggleOverlayFx } from '@/lib/overlayFx'
 import { cn } from '@/lib/utils'
 import { useRadarSource } from '@/lib/radarSource'
 import type { OverlayFx } from '@/types'
 import { RadarFxPreview } from './RadarFxPreview'
+import { OverlayFxPreviewCard } from './OverlayFxPreview'
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -43,14 +44,10 @@ export function OverlayFxSection() {
       </div>
       <div className="space-y-2.5">
         <p className="text-[11px] text-ink-500">
-          Animated effects the exported NUI page draws right over the in-game radar (players toggle them with{' '}
+          Animated effects the exported NUI page draws over the in-game minimap, the expanded radar and the pause menu map (players toggle them with{' '}
           <span className="font-mono text-ink-400">/minimapoverlay</span>). The previews show your map around the selected element.
         </p>
-        {fx.ids.length > 0 && (
-          <div className="overflow-hidden rounded-xl border border-brand-500/30 md:hidden">
-            <RadarFxPreview fx={fx} source={source} variant="hud" className="block aspect-[11/8] w-full bg-ink-950" />
-          </div>
-        )}
+        {fx.ids.length > 0 && <OverlayFxPreviewCard fx={fx} className="md:hidden" />}
         <div className="grid grid-cols-2 gap-1.5">
           {OVERLAY_FX.map((item) => {
             const on = fx.ids.includes(item.id)
@@ -77,6 +74,30 @@ export function OverlayFxSection() {
         </div>
         {fx.ids.length > 0 && (
           <>
+            <div>
+              <span className="label">Plays on</span>
+              <div className="grid grid-cols-3 gap-1.5">
+                {FX_SURFACES.map((s) => {
+                  const on = fx.targets?.[s.id] !== false
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      role="switch"
+                      aria-checked={on}
+                      onClick={() => setFx({ targets: { radar: true, bigmap: true, pause: true, ...fx.targets, [s.id]: !on } })}
+                      className={cn(
+                        'rounded-lg border px-1.5 py-1.5 text-left transition',
+                        on ? 'border-brand-500/50 bg-brand-500/10 text-ink-100' : 'border-ink-700 text-ink-500 hover:border-ink-500',
+                      )}
+                    >
+                      <span className="block text-[10px] font-semibold">{s.label}</span>
+                      <span className="block text-[9px] leading-snug text-ink-500">{s.blurb}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
             <Field label={`Intensity · ${Math.round(fx.intensity * 100)}%`}>
               <Slider value={fx.intensity} min={0.15} max={1} onChange={(v) => setFx({ intensity: v })} />
             </Field>
