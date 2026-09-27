@@ -12,6 +12,7 @@ import {
   simplifyObject,
 } from '@/lib/propGeometry'
 import type { PropAsset } from '@/lib/propTypes'
+import { fixModelName } from '@/lib/propLoad'
 import { slugify } from '@/lib/utils'
 
 export type { PropAsset } from '@/lib/propTypes'
@@ -42,10 +43,34 @@ function bakedRoot(prop: PropAsset) {
 function worldBox(prop: PropAsset) {
   const wrapped = applyPropWorldTransform(prop.object, prop.position, prop.rotation, prop.scale)
   wrapped.updateMatrixWorld(true)
-  return new THREE.Box3().setFromObject(wrapped)
+  // precise: bounds of the actual vertices, not of rotated bounding boxes
+  return new THREE.Box3().setFromObject(wrapped, true)
 }
 
-function ytypXml(resource: string, props: PropAsset[]) {
+function disposeGeometry(root: THREE.Object3D) {
+  root.traverse((c) => (c as THREE.Mesh).geometry?.dispose())
+}
+
+/** Lua single-quoted string literal. */
+function luaStr(s: string) {
+  return `'${s.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r?\n/g, '\\n')}'`
+}
+
+function xmlText(s: string) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+// CodeWalker archetype flags: 32 = Static, 131072 = Dynamic.
+const FLAG_STATIC = 32
+const FLAG_DYNAMIC = 131072
+
+/** Valid, unique model names for the whole pack (the editor already keeps them so). */
+export function resolvePropNames(props: PropAsset[]) {
+  const used = new Set<string>()
+  return props.map((p) => ({ ...p, name: fixModelName(p.name, p.label, used) }))
+}
+
+function ytypXml(resource: string, props: PropAsset[], textured: Set<string>) {
   const items = props
     .map((prop) => {
       const box = worldBox(prop)
@@ -53,7 +78,7 @@ function ytypXml(resource: string, props: PropAsset[]) {
       const physics = prop.collision === 'none' ? '' : prop.name
       return `    <Item type="CBaseArchetypeDef">
       <lodDist value="${num(prop.lodDist, 2)}" />
-      <flags value="${prop.dynamic ? 32 : 0}" />
+      <flags value="${prop.dynamic ? FLAG_DYNAMIC : FLAG_STATIC}" />
       <specialAttribute value="0" />
       <bbMin x="${num(bbMin.x)}" y="${num(bbMin.y)}" z="${num(bbMin.z)}" />
       <bbMax x="${num(bbMax.x)}" y="${num(bbMax.y)}" z="${num(bbMax.z)}" />
@@ -61,12 +86,13 @@ function ytypXml(resource: string, props: PropAsset[]) {
       <bsRadius value="${num(bsRadius)}" />
       <hdTextureDist value="${num(prop.hdTextureDist, 2)}" />
       <name>${prop.name}</name>
-      <textureDictionary>${prop.name}</textureDictionary>
+      <textureDictionary>${textured.has(prop.name) ? prop.name : ''}</textureDictionary>
       <clipDictionary />
       <drawableDictionary />
       <physicsDictionary>${physics}</physicsDictionary>
       <assetType>ASSET_TYPE_DRAWABLE</assetType>
       <assetName>${prop.name}</assetName>
+      <extensions />
     </Item>`
     })
     .join('\n')
@@ -76,7 +102,7 @@ function ytypXml(resource: string, props: PropAsset[]) {
   <archetypes>
 ${items}
   </archetypes>
-  <name>${resource}</name>
+  <name>${xmlText(resource)}</name>
   <dependencies />
   <compositeEntityTypes />
 </CMapTypes>
@@ -109,7 +135,7 @@ function configLua(props: PropAsset[]) {
   const rows = props
     .map(
       (p) =>
-        `  { model = '${p.name}', label = '${p.label.replace(/'/g, "\\'")}', lodDist = ${p.lodDist}, dynamic = ${p.dynamic} }`,
+        `  { model = ${luaStr(p.name)}, label = ${luaStr(p.label || p.name)}, lodDist = ${p.lodDist}, dynamic = ${p.dynamic} }`,
     )
     .join(',\n')
   return `Config = {}
@@ -126,7 +152,16 @@ ${rows}
 }
 
 function clientLua(resource: string) {
-  return `local function findProp(name)
+  return `-- Spawn / delete commands for the addon props of this pack.
+local RESOURCE = GetCurrentResourceName()
+local spawned = {}
+
+local function notify(msg)
+  print(('[%s] %s'):format(RESOURCE, msg))
+  TriggerEvent('chat:addMessage', { args = { RESOURCE, msg } })
+end
+
+local function findProp(name)
   if not name or name == '' then return Config.Props[1] end
   local needle = name:lower()
   for _, prop in ipairs(Config.Props) do
@@ -137,71 +172,91 @@ function clientLua(resource: string) {
   return nil
 end
 
-local function loadModel(model)
-  if not IsModelValid(model) then return false end
-  RequestModel(model)
+local function isPackModel(model)
+  for _, prop in ipairs(Config.Props) do
+    if GetHashKey(prop.model) == model then return true end
+  end
+  return false
+end
+
+local function loadModel(hash)
+  if not IsModelInCdimage(hash) or not IsModelValid(hash) then return false end
+  RequestModel(hash)
   local timeout = GetGameTimer() + 8000
-  while not HasModelLoaded(model) do
+  while not HasModelLoaded(hash) do
     if GetGameTimer() > timeout then return false end
     Wait(10)
   end
   return true
 end
 
+local function deleteProp(obj)
+  if NetworkGetEntityIsNetworked(obj) and not NetworkHasControlOfEntity(obj) then
+    NetworkRequestControlOfEntity(obj)
+    local timeout = GetGameTimer() + 1000
+    while not NetworkHasControlOfEntity(obj) and GetGameTimer() < timeout do Wait(0) end
+  end
+  SetEntityAsMissionEntity(obj, true, true)
+  DeleteEntity(obj)
+  return not DoesEntityExist(obj)
+end
+
 RegisterCommand(Config.SpawnCommand, function(_, args)
   local entry = findProp(args[1])
   if not entry then
-    print(('[%s] Unknown prop. /%s to list.'):format('${resource}', Config.ListCommand))
+    notify(('Unknown prop "%s". Use /%s to list them.'):format(args[1] or '', Config.ListCommand))
     return
   end
-  local hash = joaat(entry.model)
+  local hash = GetHashKey(entry.model)
   if not loadModel(hash) then
-    print(('[%s] Model "%s" is not streamed. Convert codewalker/%s.ytyp.xml + source GLB to .ydr/.ytd/.ytyp and put them in stream/.'):format('${resource}', entry.model, '${resource}'))
+    notify(('Model %s is not streamed yet: convert it and put the .ydr / .ytd / .ybn and ${resource}.ytyp in stream/ (see README.md).'):format(entry.model))
     return
   end
   local ped = PlayerPedId()
   local coords = GetOffsetFromEntityInWorldCoords(ped, 0.0, Config.PlaceDistance, 0.0)
   local obj = CreateObject(hash, coords.x, coords.y, coords.z, true, true, false)
-  PlaceObjectOnGroundProperly(obj)
   SetEntityHeading(obj, GetEntityHeading(ped))
+  PlaceObjectOnGroundProperly(obj)
   FreezeEntityPosition(obj, not entry.dynamic)
   SetModelAsNoLongerNeeded(hash)
-  print(('[%s] Spawned %s'):format('${resource}', entry.model))
+  spawned[#spawned + 1] = obj
+  notify(('Spawned %s'):format(entry.model))
 end, false)
 
 RegisterCommand(Config.DeleteCommand, function()
-  local ped = PlayerPedId()
-  local coords = GetEntityCoords(ped)
-  local handle, object = FindFirstObject()
-  local ok = true
+  local coords = GetEntityCoords(PlayerPedId())
   local closest, closestDist
-  while ok do
-    local pos = GetEntityCoords(object)
-    local dist = #(coords - pos)
-    if dist < 4.0 and (not closestDist or dist < closestDist) then
-      for _, prop in ipairs(Config.Props) do
-        if GetEntityModel(object) == joaat(prop.model) then
-          closest, closestDist = object, dist
-        end
-      end
+  for _, obj in ipairs(GetGamePool('CObject')) do
+    local dist = #(coords - GetEntityCoords(obj))
+    if dist < 4.0 and (not closestDist or dist < closestDist) and isPackModel(GetEntityModel(obj)) then
+      closest, closestDist = obj, dist
     end
-    ok, object = FindNextObject(handle)
   end
-  EndFindObject(handle)
-  if closest then
-    DeleteObject(closest)
-    print(('[%s] Deleted prop'):format('${resource}'))
+  if not closest then
+    notify('No prop from this pack within 4 m.')
+  elseif deleteProp(closest) then
+    notify('Deleted prop')
+  else
+    notify('Could not delete the prop (another player controls it).')
   end
 end, false)
 
 RegisterCommand(Config.ListCommand, function()
   for _, prop in ipairs(Config.Props) do
-    print(('  %s  (%s)'):format(prop.model, prop.label))
+    notify(('%s  (%s)'):format(prop.model, prop.label))
   end
 end, false)
 
+-- Props spawned by this client go away with the resource.
+AddEventHandler('onResourceStop', function(name)
+  if name ~= RESOURCE then return end
+  for _, obj in ipairs(spawned) do
+    if DoesEntityExist(obj) then DeleteEntity(obj) end
+  end
+end)
+
 TriggerEvent('chat:addSuggestion', '/' .. Config.SpawnCommand, 'Spawn an addon prop from this pack', {
-  { name = 'model', help = 'Model name (optional)' }
+  { name = 'model', help = 'Model name or label (optional)' }
 })
 TriggerEvent('chat:addSuggestion', '/' .. Config.DeleteCommand, 'Delete the closest addon prop from this pack')
 TriggerEvent('chat:addSuggestion', '/' .. Config.ListCommand, 'List addon props in this pack')
@@ -213,104 +268,118 @@ function serverLua(resource: string, count: number) {
 `
 }
 
-function readme(resource: string, props: PropAsset[]) {
-  const list = props.map((p) => `- \`${p.name}\` — ${p.label} · ${p.triangleCount} tris · ${p.collision} collision`).join('\n')
+function readme(resource: string, props: PropAsset[], files: Map<string, string[]>) {
+  const list = props
+    .map((p) => `- \`${p.name}\` — ${p.label} · ${p.triangleCount.toLocaleString('en')} tris · ${p.collision} collision · ${p.dynamic ? 'dynamic' : 'static'} · files: ${(files.get(p.name) ?? []).join(', ')}`)
+    .join('\n')
   return `# ${resource}
 
 Exported from **LABSEVE7 Tools · Prop Creator**.
 
+Browsers cannot write GTA's native \`.ydr\` / \`.ytd\` / \`.ybn\` / \`.ytyp\` binaries, so this pack contains everything
+already baked (transforms, materials, collision, LODs, bounds) for a one-step conversion with
+**Blender + Sollumz** or **CodeWalker**.
+
+## Convert (Blender + Sollumz)
+For each prop:
+1. *File → Import → glTF 2.0* \`source/<prop>.glb\` (metres, origin on the ground — do not move it).
+2. Select the mesh and use *Sollumz → Convert to Drawable*. If \`<prop>_lod1.glb\` / \`<prop>_lod2.glb\` exist,
+   import them and assign them as the **Medium** / **Low** LOD of the same drawable.
+3. Collision: import \`source/<prop>_col.obj\` (*Forward -Z, Up Y*), convert it to a *Bound Composite* with a
+   *Bound Geometry BVH* child and parent it to the drawable (skip for props with \`none\` collision).
+4. Textures are embedded in the GLB; \`source/textures/\` has the same images as power-of-two PNGs
+   (\`*_n.png\` = normal map) if you build the \`.ytd\` yourself.
+5. Export the drawable (\`<prop>.ydr\`, embedded collision and textures).
+
+Then import \`codewalker/${resource}.ytyp.xml\` (Sollumz *Import YTYP* or CodeWalker *Import XML*) and export it as
+\`${resource}.ytyp\`. Its archetypes already carry the bounds, draw distance, texture / physics dictionary names
+and the Static / Dynamic flag of each prop.
+
 ## Install
-1. Convert the files in \`codewalker/\` + \`source/\` to native GTA formats with **CodeWalker** or **Blender + Sollumz** (GLB → YDR / YTD / YBN, XML → YTYP).
-2. Drop the resulting \`.ydr\`, \`.ytd\`, \`.ybn\` and \`${resource}.ytyp\` into \`stream/\`.
-3. Copy this folder to \`resources/[${resource}]\` and add \`ensure ${resource}\` to \`server.cfg\`.
-4. In-game: \`/${'spawnprop'} [model]\`, \`/listprops\`, \`/delprop\`.
+1. Put every \`.ydr\` (and \`.ytd\` / \`.ybn\` if you made separate ones) plus \`${resource}.ytyp\` in \`stream/\`.
+2. Copy this folder to your server's \`resources/\` and add \`ensure ${resource}\` to \`server.cfg\`.
+3. In game: \`/spawnprop [model]\`, \`/listprops\`, \`/delprop\` (commands can be renamed in \`config.lua\`).
 
 ## This pack
 ${list}
 
 ## Folders
-- \`source/\` — baked GLB (origin on the ground, metres), LOD meshes, collision OBJ, extracted textures
-- \`codewalker/${resource}.ytyp.xml\` — archetype definitions (bounds, lod, texture dictionary)
-- \`stream/\` — put converted game files here
-- \`config.lua\` / \`client.lua\` — spawn commands
-
-Browsers cannot write native \`.ydr\` / \`.ytd\` / \`.ybn\` binaries. The studio bakes transforms, materials, collision and LODs so conversion is a single step.
+- \`source/\` — baked GLB per prop (Y-up glTF, metres), LOD meshes, collision OBJ, the original upload and \`textures/\`
+- \`codewalker/${resource}.ytyp.xml\` — archetype definitions (CodeWalker / Sollumz XML)
+- \`stream/\` — put the converted game files here
+- \`config.lua\` / \`client.lua\` — spawn, list and delete commands
+- \`props.json\` — the editor settings of each prop
 `
 }
 
-export async function exportPropResource(props: PropAsset[], resourceName: string) {
+export async function exportPropResource(input: PropAsset[], resourceName: string) {
+  const props = resolvePropNames(input)
   const zip = new JSZip()
-  const rootName = slugify(resourceName) || 'prop_pack'
+  const rootName = slugify(resourceName.trim() || 'prop_pack')
   const folder = zip.folder(rootName)!
   const source = folder.folder('source')!
   const textures = source.folder('textures')!
   const stream = folder.folder('stream')!
   const codewalker = folder.folder('codewalker')!
+  const files = new Map<string, string[]>()
+  // Like Sollumz: only props with textures name a texture dictionary.
+  const textured = new Set<string>()
 
   for (const prop of props) {
+    const written: string[] = []
+    const add = (dir: JSZip, path: string, data: string | ArrayBuffer | Blob) => {
+      dir.file(path, data)
+      written.push(path)
+    }
     const baked = bakedRoot(prop)
-    const glb = await exportGlb(baked)
-    source.file(`${prop.name}.glb`, glb)
-    if (prop.file.size > 64) source.file(`${prop.name}.original${extOf(prop.file)}`, prop.file)
+    add(source, `${prop.name}.glb`, await exportGlb(baked))
+    if (prop.file.size > 64) add(source, `${prop.name}.original${extOf(prop.file)}`, prop.file)
 
     if (prop.generateLods && prop.triangleCount > 80) {
-      try {
-        const lod1 = simplifyObject(baked, 0.45)
-        const lod2 = simplifyObject(baked, 0.18)
-        source.file(`${prop.name}_lod1.glb`, await exportGlb(lod1))
-        source.file(`${prop.name}_lod2.glb`, await exportGlb(lod2))
-      } catch {
-        /* keep high-only if simplify fails */
+      for (const [suffix, ratio] of [
+        ['lod1', 0.45],
+        ['lod2', 0.18],
+      ] as const) {
+        try {
+          const lod = simplifyObject(baked, ratio)
+          add(source, `${prop.name}_${suffix}.glb`, await exportGlb(lod))
+          disposeGeometry(lod)
+        } catch {
+          /* keep the high model only if simplification fails */
+        }
       }
     }
 
-    const min = new THREE.Vector3(...prop.localMin)
-    const max = new THREE.Vector3(...prop.localMax)
-    if (prop.collision === 'mesh') {
-      const colGeo = meshCollisionGeometry(prop.object, prop.collisionRatio ?? 0.25)
-      if (colGeo) {
-        const colMesh = new THREE.Mesh(colGeo)
-        const wrap = new THREE.Group()
-        wrap.add(colMesh)
-        wrap.position.set(...prop.position)
-        wrap.rotation.set((prop.rotation[0] * Math.PI) / 180, (prop.rotation[1] * Math.PI) / 180, (prop.rotation[2] * Math.PI) / 180)
-        wrap.scale.set(...prop.scale)
-        wrap.updateMatrixWorld(true)
-        const bakedCol = colGeo.clone()
-        bakedCol.applyMatrix4(colMesh.matrixWorld)
-        source.file(`${prop.name}_col.obj`, new OBJExporter().parse(new THREE.Mesh(bakedCol)))
-      }
-    } else {
-      const colGeo = makeCollisionGeometry(prop.collision, min, max, prop.object)
-      if (colGeo) {
-        const colMesh = new THREE.Mesh(colGeo)
-        const wrap = new THREE.Group()
-        wrap.add(colMesh)
-        wrap.position.set(...prop.position)
-        wrap.rotation.set((prop.rotation[0] * Math.PI) / 180, (prop.rotation[1] * Math.PI) / 180, (prop.rotation[2] * Math.PI) / 180)
-        wrap.scale.set(...prop.scale)
-        wrap.updateMatrixWorld(true)
-        const bakedCol = colGeo.clone()
-        bakedCol.applyMatrix4(colMesh.matrixWorld)
-        source.file(`${prop.name}_col.obj`, new OBJExporter().parse(new THREE.Mesh(bakedCol)))
-      }
+    const colGeo =
+      prop.collision === 'mesh'
+        ? meshCollisionGeometry(prop.object, prop.collisionRatio ?? 0.25)
+        : makeCollisionGeometry(prop.collision, new THREE.Vector3(...prop.localMin), new THREE.Vector3(...prop.localMax), prop.object)
+    if (colGeo) {
+      const col = applyPropWorldTransform(new THREE.Mesh(colGeo), prop.position, prop.rotation, prop.scale)
+      const bakedCol = bakeWorldMeshes(col)
+      add(source, `${prop.name}_col.obj`, new OBJExporter().parse(bakedCol))
+      disposeGeometry(bakedCol)
+      colGeo.dispose()
     }
 
     const maps = await extractMaterialTextures(baked)
-    for (const tex of maps) textures.file(`${prop.name}_${tex.name}`, tex.blob)
+    for (const tex of maps) add(textures, `${prop.name}_${tex.name}`, tex.blob)
+    if (maps.length) textured.add(prop.name)
+    disposeGeometry(baked)
+    files.set(prop.name, written)
   }
 
-  codewalker.file(`${rootName}.ytyp.xml`, ytypXml(rootName, props))
+  codewalker.file(`${rootName}.ytyp.xml`, ytypXml(rootName, props, textured))
   stream.file(
     'README.txt',
-    `Put ${rootName}.ytyp, plus each prop's .ydr / .ytd / .ybn in this folder after converting with CodeWalker or Sollumz.\n`,
+    `Put ${rootName}.ytyp, plus each prop's .ydr (and .ytd / .ybn if separate) in this folder after converting with Sollumz or CodeWalker. See ../README.md.\n`,
   )
 
   folder.file('fxmanifest.lua', fxmanifest(rootName))
   folder.file('config.lua', configLua(props))
   folder.file('client.lua', clientLua(rootName))
   folder.file('server.lua', serverLua(rootName, props.length))
-  folder.file('README.md', readme(rootName, props))
+  folder.file('README.md', readme(rootName, props, files))
   folder.file(
     'props.json',
     JSON.stringify(
@@ -332,6 +401,7 @@ export async function exportPropResource(props: PropAsset[], resourceName: strin
           vertexCount: p.vertexCount,
           triangleCount: p.triangleCount,
           size: p.size,
+          files: files.get(p.name) ?? [],
         })),
       },
       null,
@@ -339,7 +409,7 @@ export async function exportPropResource(props: PropAsset[], resourceName: strin
     ),
   )
 
-  return zip.generateAsync({ type: 'blob' })
+  return { blob: await zip.generateAsync({ type: 'blob' }), fileName: `${rootName}.zip`, renamed: props.filter((p, i) => p.name !== input[i].name).length }
 }
 
 function extOf(file: File) {

@@ -28,11 +28,25 @@ function getDraco() {
   return draco
 }
 
+/** Lowercase letters, digits and underscores: what archetype and file names allow. */
+export function cleanModelName(raw: string) {
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 24)
+}
+
 export function gtaModelName(raw: string, used: Set<string>) {
   let base = slugify(raw)
   if (!base.startsWith('prop_') && !base.startsWith('hash_')) base = `prop_${base}`
   base = base.slice(0, 24)
   if (base.length < 6) base = `prop_${base}`.slice(0, 24)
+  return uniqueName(base, used)
+}
+
+/** `name`, or `name_2`, `name_3`… so no two props share a model name. */
+export function uniqueName(base: string, used: Set<string>) {
   let name = base
   let i = 2
   while (used.has(name)) {
@@ -42,6 +56,60 @@ export function gtaModelName(raw: string, used: Set<string>) {
   }
   used.add(name)
   return name
+}
+
+/** A valid, unused model name for an edited name (empty falls back to the label). */
+export function fixModelName(raw: string, label: string, used: Set<string>) {
+  const clean = cleanModelName(raw)
+  return clean ? uniqueName(clean, used) : gtaModelName(label || 'prop', used)
+}
+
+/**
+ * OBJ / FBX loaders create Phong or Lambert materials. Converting them to
+ * MeshStandardMaterial makes the metalness / roughness controls work and the
+ * exported GLB a proper PBR material.
+ */
+function standardMaterial(mat: THREE.Material): THREE.Material {
+  if ((mat as THREE.MeshStandardMaterial).isMeshStandardMaterial) return mat
+  const old = mat as THREE.MeshPhongMaterial
+  const shininess = typeof old.shininess === 'number' ? old.shininess : 30
+  const next = new THREE.MeshStandardMaterial({
+    name: mat.name,
+    color: old.color ? old.color.clone() : new THREE.Color('#c4c4cc'),
+    map: old.map ?? null,
+    normalMap: old.normalMap ?? null,
+    bumpMap: old.bumpMap ?? null,
+    alphaMap: old.alphaMap ?? null,
+    emissive: old.emissive ? old.emissive.clone() : new THREE.Color(0),
+    emissiveMap: old.emissiveMap ?? null,
+    metalness: 0,
+    roughness: Math.min(0.95, Math.max(0.3, 1 - shininess / 100)),
+    transparent: mat.transparent,
+    opacity: mat.opacity,
+    alphaTest: mat.alphaTest,
+    side: mat.side,
+    vertexColors: mat.vertexColors,
+  })
+  if (old.bumpScale !== undefined) next.bumpScale = old.bumpScale
+  mat.dispose()
+  return next
+}
+
+function standardize(root: THREE.Object3D) {
+  const done = new Map<THREE.Material, THREE.Material>()
+  root.traverse((c) => {
+    const mesh = c as THREE.Mesh
+    if (!mesh.isMesh || !mesh.material) return
+    const convert = (m: THREE.Material) => {
+      let next = done.get(m)
+      if (!next) {
+        next = standardMaterial(m)
+        done.set(m, next)
+      }
+      return next
+    }
+    mesh.material = Array.isArray(mesh.material) ? mesh.material.map(convert) : convert(mesh.material)
+  })
 }
 
 function basename(path: string) {
@@ -150,6 +218,8 @@ async function loadFbx(file: File, files: File[]): Promise<{ object: THREE.Group
 async function loadStl(file: File): Promise<{ object: THREE.Group; sidecarUrls: string[] }> {
   const buf = await file.arrayBuffer()
   const geo = new STLLoader().parse(buf)
+  // STL files are Z-up (Blender, CAD); the editor and glTF are Y-up.
+  geo.rotateX(-Math.PI / 2)
   geo.computeVertexNormals()
   const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: '#c4c4cc', metalness: 0.05, roughness: 0.8 }))
   mesh.castShadow = true
@@ -171,6 +241,7 @@ export async function ingestPropFiles(list: File[] | FileList): Promise<LoadedPr
     else if (lower.endsWith('.obj')) result = await loadObj(file, expanded)
     else if (lower.endsWith('.fbx')) result = await loadFbx(file, expanded)
     else result = await loadStl(file)
+    standardize(result.object)
     loaded.push({
       name: file.name.replace(/\.[^.]+$/, ''),
       file,
