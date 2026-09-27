@@ -16,10 +16,12 @@ import { useRadarPreviewSource } from '@/hooks/useRadarPreviewSource'
 import { getData } from '@/lib/data'
 import { clamp, loadImage, readFileAsDataURL } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
-import type { MapElement } from '@/types'
+import type { LineElement, MapElement, ZoneElement } from '@/types'
+import { snapRect, snapToGrid, type Guide, type Rect as SnapBox } from '@/lib/snapping'
 import { overlayFxOf } from '@/lib/overlayFx'
 import { ElementNode, type NodeHandlers } from './nodes'
 import { OverlayFxPreview } from './OverlayFxPreview'
+import { PointEditor } from './PointEditor'
 
 type Draft =
   | { kind: 'rect'; x0: number; y0: number; x1: number; y1: number }
@@ -58,6 +60,19 @@ export function MapCanvas() {
     draftRef.current = next
     setDraftState(next)
   }, [])
+  // Element drag: every moving node's start position, the pointer at the start,
+  // the moving group's box and what it can snap to.
+  const dragRef = useRef<{
+    ids: string[]
+    start: Map<string, { x: number; y: number }>
+    pointer: { x: number; y: number }
+    box: SnapBox
+    targets: SnapBox[]
+  } | null>(null)
+  const [guides, setGuides] = useState<Guide[]>([])
+  // Pointer at the last press (document pixels): drags measure from here, since
+  // Konva only reports dragstart after the pointer has already moved a bit.
+  const pressRef = useRef<{ x: number; y: number } | null>(null)
   const [editingText, setEditingText] = useState<{ id: string; value: string; left: number; top: number; fontSize: number; color: string; width: number } | null>(null)
 
   const doc = useEditor((s) => s.doc)
@@ -65,6 +80,7 @@ export function MapCanvas() {
   const viewport = useEditor((s) => s.viewport)
   const tool = useEditor((s) => s.tool)
   const selectedIds = useEditor((s) => s.selectedIds)
+  const pointEditId = useEditor((s) => s.pointEditId)
   const zoneType = useEditor((s) => s.zoneType)
   const markerIcon = useEditor((s) => s.markerIcon)
   const {
@@ -198,6 +214,10 @@ export function MapCanvas() {
     canvasApi.finishDraft = finishDraft
     canvasApi.cancelDraft = () => setDraft(null)
     canvasApi.hasDraft = () => draftRef.current !== null
+    canvasApi.visibleRect = () => {
+      const vp = useEditor.getState().viewport
+      return { x: -vp.x / vp.scale, y: -vp.y / vp.scale, width: size.w / vp.scale, height: size.h / vp.scale }
+    }
     canvasApi.centerOn = (x, y) => {
       const vp = useEditor.getState().viewport
       setViewport({ x: size.w / 2 - x * vp.scale, y: size.h / 2 - y * vp.scale })
@@ -238,11 +258,11 @@ export function MapCanvas() {
       .filter((n): n is Konva.Node => !!n)
       .filter((n) => {
         const el = d?.elements.find((e) => e.id === n.id())
-        return el && !el.locked && el.visible
+        return el && !el.locked && el.visible && el.id !== pointEditId
       })
     tr.nodes(nodes)
     tr.getLayer()?.batchDraw()
-  }, [selectedIds, doc])
+  }, [selectedIds, doc, pointEditId])
 
   const panning = tool === 'move' || spaceDown
 
@@ -271,6 +291,7 @@ export function MapCanvas() {
     const stage = stageRef.current
     if (!stage) return
     const evt = e.evt as MouseEvent
+    pressRef.current = stage.getRelativePointerPosition()
     const screen = stage.getPointerPosition()
     if ('button' in evt && evt.button === 1 && screen) {
       const vp = useEditor.getState().viewport
@@ -431,18 +452,87 @@ export function MapCanvas() {
         const additive = 'shiftKey' in e.evt && (e.evt as MouseEvent).shiftKey
         select([id], additive)
       },
-      onDragStart: () => beginTransaction(),
-      onDragMove: (id, e) => updateElement(id, { x: e.target.x(), y: e.target.y() }, true),
-      onDragEnd: (id, e) => {
-        let x = e.target.x()
-        let y = e.target.y()
-        const d = useEditor.getState().doc
-        if (d?.grid.enabled) {
-          x = Math.round(x / d.grid.size) * d.grid.size
-          y = Math.round(y / d.grid.size) * d.grid.size
-          e.target.position({ x, y })
+      onDragStart: (id) => {
+        if (dragRef.current) return // the transformer also starts dragging the rest of the selection
+        const stage = stageRef.current
+        const st = useEditor.getState()
+        const pointer = pressRef.current ?? stage?.getRelativePointerPosition()
+        if (!stage || !pointer || !st.doc) return
+        beginTransaction()
+        const movable = (eid: string) => {
+          const el = st.doc!.elements.find((e) => e.id === eid)
+          return !!el && !el.locked && el.visible
         }
-        updateElement(id, { x, y }, true)
+        const ids = st.selectedIds.includes(id) ? st.selectedIds.filter(movable) : [id]
+        const rectOf = (node: Konva.Node) => node.getClientRect({ relativeTo: stage, skipShadow: true })
+        const start = new Map<string, { x: number; y: number }>()
+        const boxes: SnapBox[] = []
+        for (const eid of ids) {
+          const node = nodeRefs.current.get(eid)
+          if (!node) continue
+          start.set(eid, node.position())
+          boxes.push(rectOf(node))
+        }
+        const x0 = Math.min(...boxes.map((b) => b.x))
+        const y0 = Math.min(...boxes.map((b) => b.y))
+        const box = { x: x0, y: y0, width: Math.max(...boxes.map((b) => b.x + b.width)) - x0, height: Math.max(...boxes.map((b) => b.y + b.height)) - y0 }
+        const frame = mapFrame(st.doc)
+        const targets: SnapBox[] = [{ x: 0, y: 0, width: frame.width, height: frame.height }]
+        for (const el of st.doc.elements) {
+          if (start.has(el.id) || !el.visible) continue
+          const node = nodeRefs.current.get(el.id)
+          if (node) targets.push(rectOf(node))
+        }
+        dragRef.current = { ids: [...start.keys()], start, pointer, box, targets }
+      },
+      onDragMove: (_id, e) => {
+        const d = dragRef.current
+        const stage = stageRef.current
+        const pointer = stage?.getRelativePointerPosition()
+        const st = useEditor.getState()
+        if (!d || !pointer || !st.doc) return
+        // Every node of the moving group reports dragmove; each one re-applies the
+        // same result, computed from the pointer so it does not compound.
+        let dx = pointer.x - d.pointer.x
+        let dy = pointer.y - d.pointer.y
+        const free = e.evt.altKey
+        let next: Guide[] = []
+        let snappedX = false
+        let snappedY = false
+        if (st.snap && !free) {
+          const r = snapRect({ ...d.box, x: d.box.x + dx, y: d.box.y + dy }, d.targets, 6 / st.viewport.scale)
+          dx += r.dx
+          dy += r.dy
+          snappedX = r.snappedX
+          snappedY = r.snappedY
+          next = r.guides
+        }
+        if (st.doc.grid.enabled && !free) {
+          const g = st.doc.grid.size
+          if (!snappedX) dx = snapToGrid(d.box.x + dx, g) - d.box.x
+          if (!snappedY) dy = snapToGrid(d.box.y + dy, g) - d.box.y
+        }
+        const patches: Record<string, Partial<MapElement>> = {}
+        for (const eid of d.ids) {
+          const s0 = d.start.get(eid)!
+          const pos = { x: s0.x + dx, y: s0.y + dy }
+          nodeRefs.current.get(eid)?.position(pos)
+          patches[eid] = pos
+        }
+        st.patchElementsLive(patches)
+        setGuides((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
+      },
+      onDragEnd: () => {
+        const d = dragRef.current
+        if (!d) return
+        dragRef.current = null
+        const patches: Record<string, Partial<MapElement>> = {}
+        for (const eid of d.ids) {
+          const node = nodeRefs.current.get(eid)
+          if (node) patches[eid] = { x: node.x(), y: node.y() }
+        }
+        useEditor.getState().patchElementsLive(patches)
+        setGuides([])
         endTransaction()
       },
       onTransformStart: () => beginTransaction(),
@@ -473,6 +563,10 @@ export function MapCanvas() {
         endTransaction()
       },
       onDblClick: (el) => {
+        if ((el.type === 'zone' || el.type === 'line') && !el.locked && useEditor.getState().tool === 'select') {
+          useEditor.getState().setPointEdit(el.id)
+          return
+        }
         if (el.type !== 'text' || el.locked) return
         const node = nodeRefs.current.get(el.id)
         const stage = stageRef.current
@@ -507,6 +601,10 @@ export function MapCanvas() {
   const cursor = panning ? 'grab' : tool === 'select' ? 'default' : tool === 'color' ? 'cell' : 'crosshair'
   const singleSelected = selectedIds.length === 1 ? doc.elements.find((e) => e.id === selectedIds[0]) : undefined
   const keepRatio = singleSelected ? singleSelected.type === 'text' || singleSelected.type === 'marker' : false
+  const pointEditShape =
+    tool === 'select' && singleSelected && singleSelected.id === pointEditId && (singleSelected.type === 'zone' || singleSelected.type === 'line') && singleSelected.visible && !singleSelected.locked
+      ? (singleSelected as ZoneElement | LineElement)
+      : null
 
   return (
     <div
@@ -633,8 +731,23 @@ export function MapCanvas() {
             />
           </Layer>
 
+          {/* Point editing */}
+          {pointEditShape && (
+            <Layer>
+              <PointEditor el={pointEditShape} scale={viewport.scale} />
+            </Layer>
+          )}
+
           {/* Drafts */}
           <Layer listening={false}>
+            {guides.map((g, i) => (
+              <Line
+                key={i}
+                points={g.axis === 'x' ? [g.at, g.from, g.at, g.to] : [g.from, g.at, g.to, g.at]}
+                stroke="#ff3ea5"
+                strokeWidth={1 / viewport.scale}
+              />
+            ))}
             {draft?.kind === 'rect' && (
               <Rect
                 x={Math.min(draft.x0, draft.x1)}
@@ -701,6 +814,12 @@ export function MapCanvas() {
         />
       )}
 
+      {pointEditShape && (
+        <div className="pointer-events-none absolute top-3 left-1/2 max-w-[92%] -translate-x-1/2 rounded-full border border-ink-700 bg-ink-900/90 px-3 py-1.5 text-center text-xs text-ink-300 backdrop-blur">
+          Editing points · drag a point (snaps to other zones; <span className="text-ink-100">Alt</span> = free) · drag an edge's middle dot to add one ·{' '}
+          <span className="text-ink-100">Alt+click</span> / <span className="text-ink-100">Delete</span> removes · <span className="text-ink-100">Esc</span> to finish
+        </div>
+      )}
       {(tool === 'polygon' || tool === 'line') && (
         <div className="pointer-events-none absolute top-3 left-1/2 -translate-x-1/2 rounded-full border border-ink-700 bg-ink-900/90 px-3 py-1.5 text-xs text-ink-300 backdrop-blur">
           Click to add points · <span className="text-ink-100">Enter</span> or double-click to finish · <span className="text-ink-100">Esc</span> to cancel

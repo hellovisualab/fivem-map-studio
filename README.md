@@ -12,6 +12,9 @@ A visual minimap editor for FiveM (GTA V) servers. Design custom minimaps in the
 - **Cayo Perico** – optionally add the heist island south-east of Los Santos (on project creation or later under *Map settings → Islands*). The canvas grows to include a stylized island in your map's colors; zones, markers and labels drawn on it export with real GTA coordinates, and the resource streams the island in-game (game build 2189+)
 - **Canvas editor (Konva)** – zoom (wheel / pinch), pan (hand tool, space-drag, middle mouse), optional grid, live pixel + GTA world coordinates
 - **Tools** – select, move, text, image, rectangle zone, line, polygon zone, marker, paint color, undo / redo, delete
+- **Point editing** – double-click a zone or line (or press `Enter`) to drag its points, drag an edge's middle dot to add one, `Alt+click` / `Delete` to remove one; points snap to other zones' corners and edges so neighbouring territories share borders
+- **Smart guides & snapping** – moving elements snaps their edges and centres to other elements and the map frame (pink guides), or to the grid; toggle *Snap* in the status bar, hold `Alt` to move freely
+- **Copy / paste** – `Ctrl+C` / `Ctrl+X` / `Ctrl+V`, also between projects and tabs; pasting a screenshot from the clipboard adds it as an image
 - **Layers panel** – show/hide, lock, drag to reorder, bring forward / send backward, search
 - **Map styles & effects (Photoshop-like)**
   - One-click style presets: Clean, Neon Purple, Inferno, Blood, Ice, Miami, Gold, Noir, Toxic
@@ -40,16 +43,19 @@ A visual minimap editor for FiveM (GTA V) servers. Design custom minimaps in the
 | `V` `H` `T` `I` `Z` `L` `P` `M` `C` | Select · Move · Text · Image · Zone · Line · Polygon · Marker · Paint |
 | `Ctrl+Z` / `Ctrl+Shift+Z` (`Ctrl+Y`) | Undo / Redo |
 | `Ctrl+S` | Save |
+| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste (works across projects; pastes clipboard images too) |
 | `Ctrl+D` | Duplicate selection |
 | `Ctrl+A` | Select all |
 | `Ctrl+E` | Export |
-| `Delete` / `Backspace` | Delete selection |
-| `Esc` | Cancel drawing / clear selection |
-| `Enter` | Finish polygon or line |
+| `Delete` / `Backspace` | Delete selection (while editing points: the selected point) |
+| `Esc` | Cancel drawing / stop editing points / clear selection |
+| `Enter` | Finish polygon or line · edit the points of the selected zone or line |
+| Double-click a zone or line | Edit its points (`Alt+click` a point to remove it) |
+| `Alt` while dragging | Move without snapping |
 | `G` | Toggle grid |
 | `+` / `-` / `Ctrl+0` / `Shift+1` | Zoom in / out / 100% / fit |
 | `[` / `]` (`Shift` = to back / front) | Reorder layer |
-| Arrow keys (`Shift` = 10px) | Nudge selection |
+| Arrow keys (`Shift` = 10px) | Nudge selection (or the selected point) |
 | `Space` + drag / middle mouse | Pan |
 
 ## Getting started

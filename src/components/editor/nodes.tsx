@@ -14,7 +14,7 @@ export interface NodeHandlers {
   listening: boolean
   register: (id: string, node: Konva.Node | null) => void
   onSelect: (id: string, e: KonvaEventObject<MouseEvent | TouchEvent>) => void
-  onDragStart: () => void
+  onDragStart: (id: string, e: KonvaEventObject<DragEvent>) => void
   onDragMove: (id: string, e: KonvaEventObject<DragEvent>) => void
   onDragEnd: (id: string, e: KonvaEventObject<DragEvent>) => void
   onTransformStart: () => void
@@ -53,7 +53,7 @@ function common(el: MapElement, h: NodeHandlers) {
     onTap: (e: KonvaEventObject<TouchEvent>) => h.onSelect(el.id, e),
     onDblClick: (e: KonvaEventObject<MouseEvent>) => h.onDblClick(el, e),
     onDblTap: (e: KonvaEventObject<TouchEvent>) => h.onDblClick(el, e),
-    onDragStart: h.onDragStart,
+    onDragStart: (e: KonvaEventObject<DragEvent>) => h.onDragStart(el.id, e),
     onDragMove: (e: KonvaEventObject<DragEvent>) => h.onDragMove(el.id, e),
     onDragEnd: (e: KonvaEventObject<DragEvent>) => h.onDragEnd(el.id, e),
     onTransformStart: h.onTransformStart,

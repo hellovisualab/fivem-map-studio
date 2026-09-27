@@ -3,6 +3,7 @@ import type { MapDocument, MapElement, Project, ToolId, ZoneType, MarkerIcon } f
 import { getData } from '@/lib/data'
 import { cloneElement, normalizeDocument } from '@/lib/elements'
 import { debounce } from '@/lib/utils'
+import { copyElements, takePaste } from '@/lib/clipboard'
 
 export type SaveState = 'saved' | 'saving' | 'unsaved' | 'error' | 'idle'
 
@@ -29,6 +30,12 @@ interface EditorState {
   markerIcon: MarkerIcon
   paintColor: string
   panels: { layers: boolean; properties: boolean; toolbar: boolean }
+  /** Smart guides + magnetic snapping while moving elements and points. */
+  snap: boolean
+  /** Zone or line whose points are being edited (vertex handles instead of the transformer). */
+  pointEditId: string | null
+  /** Index of the selected vertex while editing points. */
+  activeVertex: number | null
   thumbnailProvider: (() => Promise<string | undefined>) | null
 
   loadProject: (project: Project) => void
@@ -41,6 +48,11 @@ interface EditorState {
   setPointer: (p: { x: number; y: number } | null) => void
   togglePanel: (p: keyof EditorState['panels']) => void
   setThumbnailProvider: (fn: (() => Promise<string | undefined>) | null) => void
+  setSnap: (on: boolean) => void
+  setPointEdit: (id: string | null) => void
+  setActiveVertex: (i: number | null) => void
+  /** Removes one vertex of a zone (keeps ≥ 3) or line (keeps ≥ 2). Returns false if it can't. */
+  deleteVertex: (id: string, index: number) => boolean
 
   select: (ids: string[], additive?: boolean) => void
   clearSelection: () => void
@@ -50,10 +62,16 @@ interface EditorState {
   endTransaction: () => void
   updateElement: (id: string, patch: Partial<MapElement>, live?: boolean) => void
   updateElements: (ids: string[], patch: Partial<MapElement>) => void
+  /** Live (no history) patches for several elements at once, e.g. during a multi-drag. */
+  patchElementsLive: (patches: Record<string, Partial<MapElement>>) => void
   addElement: (el: MapElement, selectIt?: boolean) => void
   deleteElements: (ids: string[]) => void
   deleteSelected: () => void
   duplicateSelected: () => void
+  copySelected: () => number
+  cutSelected: () => number
+  /** Pastes the clipboard; `view` is the visible part of the canvas (document pixels). */
+  paste: (view: { x: number; y: number; width: number; height: number }) => number
   reorderElement: (id: string, toIndex: number) => void
   moveLayer: (id: string, dir: 'up' | 'down' | 'top' | 'bottom') => void
   toggleVisible: (id: string) => void
@@ -71,6 +89,15 @@ interface EditorState {
 }
 
 const MAX_HISTORY = 80
+const SNAP_KEY = 'labseve7:snap'
+
+function loadSnap() {
+  try {
+    return localStorage.getItem(SNAP_KEY) !== 'off'
+  } catch {
+    return true
+  }
+}
 
 const applyMutation = (doc: MapDocument, mutate: (d: MapDocument) => MapDocument | void): MapDocument => {
   const draft: MapDocument = structuredClone(doc)
@@ -99,6 +126,9 @@ export const useEditor = create<EditorState>((set, get) => {
     markerIcon: 'police',
     paintColor: '#ec4899',
     panels: { layers: true, properties: true, toolbar: true },
+    snap: loadSnap(),
+    pointEditId: null,
+    activeVertex: null,
     thumbnailProvider: null,
 
     loadProject: (project) => {
@@ -121,7 +151,7 @@ export const useEditor = create<EditorState>((set, get) => {
       set({ project: null, doc: null, past: [], future: [], selectedIds: [], saveState: 'idle' })
     },
 
-    setTool: (tool) => set({ tool }),
+    setTool: (tool) => set({ tool, pointEditId: null, activeVertex: null }),
     setZoneType: (zoneType) => set({ zoneType }),
     setMarkerIcon: (markerIcon) => set({ markerIcon }),
     setPaintColor: (paintColor) => set({ paintColor }),
@@ -129,18 +159,31 @@ export const useEditor = create<EditorState>((set, get) => {
     setPointer: (pointer) => set({ pointer }),
     togglePanel: (p) => set((s) => ({ panels: { ...s.panels, [p]: !s.panels[p] } })),
     setThumbnailProvider: (fn) => set({ thumbnailProvider: fn }),
+    setSnap: (snap) => {
+      try {
+        localStorage.setItem(SNAP_KEY, snap ? 'on' : 'off')
+      } catch {
+        /* preference only */
+      }
+      set({ snap })
+    },
 
     select: (ids, additive = false) =>
       set((s) => {
-        if (!additive) return { selectedIds: ids }
-        const next = new Set(s.selectedIds)
-        for (const id of ids) {
-          if (next.has(id)) next.delete(id)
-          else next.add(id)
+        let selectedIds = ids
+        if (additive) {
+          const next = new Set(s.selectedIds)
+          for (const id of ids) {
+            if (next.has(id)) next.delete(id)
+            else next.add(id)
+          }
+          selectedIds = [...next]
         }
-        return { selectedIds: [...next] }
+        // Point editing survives only while its shape stays the sole selection.
+        const keep = s.pointEditId !== null && selectedIds.length === 1 && selectedIds[0] === s.pointEditId
+        return keep ? { selectedIds } : { selectedIds, pointEditId: null, activeVertex: null }
       }),
-    clearSelection: () => set({ selectedIds: [] }),
+    clearSelection: () => set({ selectedIds: [], pointEditId: null, activeVertex: null }),
 
     commit: (mutate, opts) => {
       const { doc, past } = get()
@@ -200,6 +243,32 @@ export const useEditor = create<EditorState>((set, get) => {
       })
     },
 
+    setPointEdit: (id) => {
+      const el = id ? get().doc?.elements.find((e) => e.id === id) : null
+      if (id && (!el || (el.type !== 'zone' && el.type !== 'line') || el.locked)) return
+      set(id ? { pointEditId: id, activeVertex: null, selectedIds: [id], tool: 'select' } : { pointEditId: null, activeVertex: null })
+    },
+    setActiveVertex: (activeVertex) => set({ activeVertex }),
+    deleteVertex: (id, index) => {
+      const el = get().doc?.elements.find((e) => e.id === id)
+      if (!el || (el.type !== 'zone' && el.type !== 'line') || el.locked) return false
+      const min = el.type === 'zone' ? 6 : 4
+      if (el.points.length - 2 < min || index < 0 || index * 2 >= el.points.length) return false
+      const points = [...el.points.slice(0, index * 2), ...el.points.slice(index * 2 + 2)]
+      get().updateElement(id, { points } as Partial<MapElement>)
+      set({ activeVertex: null })
+      return true
+    },
+
+    patchElementsLive: (patches) => {
+      set((s) => {
+        if (!s.doc) return {}
+        return {
+          doc: { ...s.doc, elements: s.doc.elements.map((e) => (patches[e.id] ? ({ ...e, ...patches[e.id] } as MapElement) : e)) },
+        }
+      })
+    },
+
     addElement: (el, selectIt = true) => {
       get().commit((d) => {
         d.elements.push(el)
@@ -228,6 +297,35 @@ export const useEditor = create<EditorState>((set, get) => {
         d.elements.push(...clones)
       })
       set({ selectedIds: clones.map((c) => c.id) })
+    },
+
+    copySelected: () => {
+      const { selectedIds, doc } = get()
+      if (!doc) return 0
+      const els = doc.elements.filter((e) => selectedIds.includes(e.id))
+      copyElements(els)
+      return els.length
+    },
+
+    cutSelected: () => {
+      const { selectedIds, doc } = get()
+      if (!doc) return 0
+      const els = doc.elements.filter((e) => selectedIds.includes(e.id) && !e.locked)
+      if (!els.length) return 0
+      copyElements(els)
+      get().deleteElements(els.map((e) => e.id))
+      return els.length
+    },
+
+    paste: (view) => {
+      if (!get().doc) return 0
+      const els = takePaste(view)
+      if (!els.length) return 0
+      get().commit((d) => {
+        d.elements.push(...els)
+      })
+      set({ selectedIds: els.map((e) => e.id) })
+      return els.length
     },
 
     reorderElement: (id, toIndex) => {

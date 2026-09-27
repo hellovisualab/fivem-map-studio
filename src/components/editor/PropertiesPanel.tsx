@@ -1,6 +1,6 @@
 import { useId, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Copy, Grid3X3, LocateFixed, Pipette, RotateCcw, Sparkles, Trash2, TreePalm, Upload } from 'lucide-react'
+import { Copy, Grid3X3, LocateFixed, PenTool, Pipette, RotateCcw, Sparkles, Trash2, TreePalm, Upload } from 'lucide-react'
 import { useEditor } from '@/store/useEditor'
 import { useAuth } from '@/store/useAuth'
 import { DEFAULT_WORLD, FONTS, MARKER_ICONS, PALETTE, STYLE_PRESETS, TEXT_PRESETS, ZONE_TYPES } from '@/lib/constants'
@@ -552,7 +552,8 @@ function MultiSettings({ elements }: { elements: MapElement[] }) {
 
 function ElementSettings({ el }: { el: MapElement }) {
   const doc = useEditor((s) => s.doc)!
-  const { updateElement, deleteSelected, duplicateSelected } = useEditor.getState()
+  const { updateElement, deleteSelected, duplicateSelected, setPointEdit } = useEditor.getState()
+  const pointEditing = useEditor((s) => s.pointEditId === el.id)
   const user = useAuth((s) => s.user)
   const iconRef = useRef<HTMLInputElement>(null)
   const set = (patch: Partial<MapElement>) => updateElement(el.id, patch)
@@ -851,6 +852,18 @@ function ElementSettings({ el }: { el: MapElement }) {
       <EffectsSection el={el} />
 
       <Section title="Actions">
+        {(el.type === 'zone' || el.type === 'line') && (
+          <Button
+            variant={pointEditing ? 'primary' : 'secondary'}
+            size="sm"
+            className="mb-2 w-full"
+            disabled={el.locked}
+            onClick={() => setPointEdit(pointEditing ? null : el.id)}
+            title="Double-click the shape or press Enter"
+          >
+            <PenTool className="h-3.5 w-3.5" /> {pointEditing ? 'Done editing points' : 'Edit points'}
+          </Button>
+        )}
         <div className="flex gap-2">
           <Button variant="secondary" size="sm" className="flex-1" onClick={duplicateSelected}>
             <Copy className="h-3.5 w-3.5" /> Duplicate
