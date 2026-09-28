@@ -3,8 +3,8 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Billboard, OrbitControls, TransformControls } from '@react-three/drei'
 import * as THREE from 'three'
 import type { OrbitControls as OrbitControlsImpl, TransformControls as TransformControlsImpl } from 'three-stdlib'
-import { Hand, Maximize, Search } from 'lucide-react'
-import { buildGeometry, objectGeometry, objectMatrix, evaluateObject } from '@/lib/modeler/build'
+import { Check, Hand, Maximize, Search, X } from 'lucide-react'
+import { buildGeometry, objectGeometry, objectMatrix, evaluateObject, modifierTargets } from '@/lib/modeler/build'
 import { duplicateObject } from '@/lib/modeler/doc'
 import {
   buildEdges,
@@ -26,7 +26,7 @@ import {
   type OpResult,
 } from '@/lib/modeler/mesh'
 import { toggleEditMode, selectAllToggle, deleteObjects, joinSelected, hideSelected, revealAll, clearTransform, fill, separateSelection, recalcSelection, flipSelection, trisToQuadsSelection, growSelection, selectLinkedAll, setSelectMode } from '@/lib/modeler/ops'
-import type { EditMesh, MeshSelection, ModelDoc, ModelMaterial, ModelObject, SelectMode, Vec3 } from '@/lib/modeler/types'
+import type { EditMesh, MeshSelection, ModelDoc, ModelObject, SelectMode, Vec3 } from '@/lib/modeler/types'
 import { activeObject, useModeler, withObject } from '@/store/useModeler'
 import { ROOT_INVERSE, ROOT_MATRIX, docToWorld, modelMaterials, objectWorldMatrix, viewport, worldToDoc, type ViewName, type ViewportApi } from '@/components/modeler/bridge'
 import { PopupMenu, type MenuItem } from '@/components/modeler/PopupMenu'
@@ -133,26 +133,42 @@ function inMode(mesh: EditMesh, sel: MeshSelection, mode: SelectMode): MeshSelec
 /* ---------------------------------------------------------------------------------------- */
 /* Scene pieces                                                                              */
 
-function ObjectView({ obj, materials, selected, active, objectMode, shading, xray, registry }: { obj: ModelObject; materials: ModelMaterial[]; selected: boolean; active: boolean; objectMode: boolean; shading: string; xray: boolean; registry: Map<string, THREE.Mesh> }) {
+// objects are replaced (never mutated) on change, so their identity works as a version
+const versions = new WeakMap<object, number>()
+let nextVersion = 1
+const versionOf = (o: object) => {
+  let v = versions.get(o)
+  if (!v) versions.set(o, (v = nextVersion++))
+  return v
+}
+
+const helperMaterial = new THREE.MeshBasicMaterial({ color: '#9aa0b4', transparent: true, opacity: 0.06, depthWrite: false, side: THREE.DoubleSide })
+
+function ObjectView({ obj, doc, selected, active, objectMode, shading, xray, registry }: { obj: ModelObject; doc: ModelDoc; selected: boolean; active: boolean; objectMode: boolean; shading: string; xray: boolean; registry: Map<string, THREE.Mesh> }) {
+  const materials = doc.materials
   const usesBox = obj.materials.some((id) => materials.find((m) => m.id === id)?.uvMode !== 'mesh')
+  // booleans read other objects: rebuild when they or this transform change
+  const targets = modifierTargets(obj, doc)
+  const boolKey = targets.length ? `${[obj.position, obj.rotation, obj.scale].join('|')}#${targets.map(versionOf).join(',')}` : ''
   const scaleKey = usesBox ? obj.scale.join(',') : ''
   const geo = useMemo(
-    () => objectGeometry(obj, materials),
+    () => objectGeometry(obj, materials, doc),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [obj.mesh, obj.modifiers, obj.autoSmooth, obj.materials, materials, scaleKey],
+    [obj.mesh, obj.modifiers, obj.autoSmooth, obj.materials, materials, scaleKey, boolKey],
   )
   useEffect(() => () => geo.dispose(), [geo])
   const material = useMemo(() => {
     if (obj.role === 'collision') return collisionMaterial
+    if (obj.role === 'helper') return helperMaterial
     if (shading === 'wireframe') return wireMaterial
     if (xray) return xrayMaterial
     if (shading === 'solid') return solidMaterial
     return modelMaterials.forObject(obj, materials)
   }, [obj, materials, shading, xray])
-  const showEdges = (selected && objectMode) || shading === 'wireframe' || obj.role === 'collision'
+  const showEdges = (selected && objectMode) || shading === 'wireframe' || obj.role !== 'visual'
   const edges = useMemo(() => (showEdges ? new THREE.EdgesGeometry(geo, 25) : null), [geo, showEdges])
   useEffect(() => () => edges?.dispose(), [edges])
-  const edgeColor = selected && objectMode ? (active ? '#ffc061' : '#e0781f') : obj.role === 'collision' ? '#33dfff' : '#8f96ab'
+  const edgeColor = selected && objectMode ? (active ? '#ffc061' : '#e0781f') : obj.role === 'collision' ? '#33dfff' : obj.role === 'helper' ? '#b4bac9' : '#8f96ab'
   return (
     <group position={obj.position} rotation={[obj.rotation[0], obj.rotation[1], obj.rotation[2]]} scale={obj.scale} visible={obj.visible}>
       <mesh
@@ -168,7 +184,7 @@ function ObjectView({ obj, materials, selected, active, objectMode, shading, xra
       />
       {edges && (
         <lineSegments geometry={edges} renderOrder={2} raycast={() => null}>
-          <lineBasicMaterial color={edgeColor} transparent opacity={selected && objectMode ? 1 : 0.8} />
+          <lineBasicMaterial color={edgeColor} transparent opacity={selected && objectMode ? 1 : obj.role === 'helper' ? 0.55 : 0.8} depthTest={obj.role !== 'helper'} />
         </lineSegments>
       )}
     </group>
@@ -702,7 +718,7 @@ function Controller({ registry, cage, gizmo, container, mouse, menuOpen, onMenu,
         for (const o of s.doc.objects) {
           if (!o.visible) continue
           const M = objectWorldMatrix(o)
-          const mesh = evaluateObject(o)
+          const mesh = evaluateObject(o, s.doc)
           const step = Math.max(1, Math.floor(mesh.verts.length / 3000))
           for (let i = 0; i < mesh.verts.length; i += step) {
             if (inside(project(new THREE.Vector3(...mesh.verts[i]).applyMatrix4(M)))) {
@@ -1129,7 +1145,10 @@ function Controller({ registry, cage, gizmo, container, mouse, menuOpen, onMenu,
       if (!o || box.isEmpty()) return
       const center = box.getCenter(new THREE.Vector3())
       const radius = Math.max(0.15, box.getSize(new THREE.Vector3()).length() / 2)
-      const d = radius / Math.sin(THREE.MathUtils.degToRad(c.fov) / 2)
+      // fit the narrower of the vertical and horizontal fields of view (portrait phones)
+      const vHalf = THREE.MathUtils.degToRad(c.fov) / 2
+      const hHalf = Math.atan(Math.tan(vHalf) * c.aspect)
+      const d = radius / Math.sin(Math.min(vHalf, hHalf))
       const dir = c.position.clone().sub(o.target).normalize()
       o.target.copy(center)
       c.position.copy(center).addScaledVector(dir, d * 1.1)
@@ -1142,7 +1161,7 @@ function Controller({ registry, cage, gizmo, container, mouse, menuOpen, onMenu,
       for (const o of st().doc.objects) {
         if (!o.visible || !filter(o)) continue
         const M = objectWorldMatrix(o)
-        for (const p of evaluateObject(o).verts) box.expandByPoint(tmp.set(p[0], p[1], p[2]).applyMatrix4(M))
+        for (const p of evaluateObject(o, st().doc).verts) box.expandByPoint(tmp.set(p[0], p[1], p[2]).applyMatrix4(M))
       }
       return box
     }
@@ -1182,25 +1201,76 @@ function Controller({ registry, cage, gizmo, container, mouse, menuOpen, onMenu,
       zoomBy,
       frameSelected,
       frameAll,
-      openMenu: (kind) => onMenu(kind, mouse.current),
+      openMenu: (kind, at) => onMenu(kind, at ? local(at) : mouse.current),
+      confirmModal: () => finishModal(true),
+      cancelModal: () => finishModal(false),
       cameraQuaternion,
     }
     viewport.current = api
 
     /* ---------------- events ---------------- */
 
-    let drag: { start: P; box: boolean; shift: boolean; ctrl: boolean; alt: boolean } | null = null
+    let drag: { start: P; box: boolean; shift: boolean; ctrl: boolean; alt: boolean; touch: boolean } | null = null
     const root = container.current!
+    // touch: one finger taps select (drag orbits), a long press opens the menu, two fingers zoom / pan
+    const touches = new Set<number>()
+    let longPress = 0
+    let modalTouch = false
+    const cancelLongPress = () => {
+      if (longPress) window.clearTimeout(longPress)
+      longPress = 0
+    }
+
+    /** Touch starts a modal drag where the finger lands. */
+    const rebaseModal = (p: P) => {
+      const m = modal.current
+      if (!m) return
+      if (m.kind === 'transform') {
+        applyDelta(m.target, m.pivot, new THREE.Vector3(), new THREE.Quaternion(), new THREE.Vector3(1, 1, 1))
+        m.start = { ...p }
+        m.angle = 0
+        m.lastAngle = screenAngle(m, p)
+      } else if (m.kind === 'inset') {
+        m.start = { ...p }
+        m.startDist = Math.max(40, dist(p, m.pivotScreen))
+      }
+      updateModal(p, false, false)
+    }
 
     const onDown = (e: PointerEvent) => {
       if (e.target !== canvas()) return
       const p = local(e)
       mouse.current = p
+      lastPointer = e.pointerType
+      const touch = e.pointerType === 'touch'
+      if (touch) touches.add(e.pointerId)
       if (modal.current) {
         e.preventDefault()
         e.stopPropagation()
+        if (touch) {
+          if (touches.size > 1) return
+          modalTouch = true
+          rebaseModal(p)
+          return
+        }
         if (e.button === 0) finishModal(true)
         else if (e.button === 2) finishModal(false)
+        return
+      }
+      if (touch) {
+        cancelLongPress()
+        if (touches.size > 1) {
+          drag = null
+          return
+        }
+        drag = { start: p, box: false, shift: false, ctrl: false, alt: false, touch: true }
+        longPress = window.setTimeout(() => {
+          longPress = 0
+          if (drag?.touch && touches.size === 1) {
+            drag = null
+            onMenu('context', { x: p.x + 12, y: p.y + 12 })
+          }
+        }, 550)
         return
       }
       if (e.button === 2) {
@@ -1213,20 +1283,29 @@ function Controller({ registry, cage, gizmo, container, mouse, menuOpen, onMenu,
       const g = gizmo.current as unknown as { axis: string | null; dragging: boolean } | null
       if (g && (g.axis || g.dragging)) return
       if (e.altKey) {
-        drag = { start: p, box: false, shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: true }
+        drag = { start: p, box: false, shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: true, touch: false }
         return
       }
       if (st().tool === 'cursor') {
         placeCursor(p)
         return
       }
-      drag = { start: p, box: false, shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: false }
+      drag = { start: p, box: false, shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: false, touch: false }
     }
     const onMove = (e: PointerEvent) => {
       const p = local(e)
+      if (e.pointerType === 'touch' && !touches.has(e.pointerId)) return
       mouse.current = p
       if (modal.current) {
+        if (e.pointerType === 'touch' && !modalTouch) return
         updateModal(p, e.ctrlKey || e.metaKey, e.shiftKey)
+        return
+      }
+      if (drag?.touch) {
+        if (dist(p, drag.start) > 10) {
+          cancelLongPress()
+          drag = null
+        }
         return
       }
       if (drag && !drag.alt) {
@@ -1235,10 +1314,28 @@ function Controller({ registry, cage, gizmo, container, mouse, menuOpen, onMenu,
       }
     }
     const onUp = (e: PointerEvent) => {
+      const touch = e.pointerType === 'touch'
+      if (touch) {
+        touches.delete(e.pointerId)
+        cancelLongPress()
+        if (modal.current && modalTouch) {
+          // lifting the finger ends a touch drag of the operation (loop cut: the tap cuts)
+          modalTouch = false
+          finishModal(true)
+          return
+        }
+      }
       const d = drag
       drag = null
-      if (!d || e.button !== 0) return
+      if (!d || (!touch && e.button !== 0)) return
       const p = local(e)
+      if (d.touch) {
+        if (dist(p, d.start) <= 10) {
+          if (st().tool === 'cursor') placeCursor(p)
+          else clickSelect(p, false)
+        }
+        return
+      }
       if (d.alt) {
         if (dist(p, d.start) < 4 && st().mode === 'edit') loopSelect(p, d.ctrl, d.shift)
         return
@@ -1258,7 +1355,16 @@ function Controller({ registry, cage, gizmo, container, mouse, menuOpen, onMenu,
       m.cuts = Math.max(1, Math.min(32, m.cuts + (e.deltaY < 0 ? 1 : -1)))
       updateLoopCut(m, m.last, true)
     }
-    const onContext = (e: MouseEvent) => e.preventDefault()
+    // a touch long press arrives as the platform's contextmenu event: open the menu there
+    let lastPointer = 'mouse'
+    const onContext = (e: MouseEvent) => {
+      e.preventDefault()
+      if (lastPointer !== 'touch' || modal.current || e.target !== canvas()) return
+      cancelLongPress()
+      drag = null
+      const p = local(e)
+      onMenu('context', { x: p.x + 12, y: p.y + 12 })
+    }
 
     const setAltOrbit = (on: boolean) => {
       const o = orbit()
@@ -1360,6 +1466,10 @@ function Controller({ registry, cage, gizmo, container, mouse, menuOpen, onMenu,
         if (!edit) return k === 'delete' ? deleteObjects() : onMenu('delete', mouse.current)
         return onMenu('delete', mouse.current)
       }
+      if (k === 'n' && !ctrl && !e.shiftKey && !e.altKey) {
+        handled()
+        return s.setSidebar(!s.sidebar)
+      }
       if (k === 'h' && !ctrl && !edit) {
         handled()
         if (e.altKey) return revealAll()
@@ -1438,7 +1548,13 @@ function Controller({ registry, cage, gizmo, container, mouse, menuOpen, onMenu,
     }
     const onBlur = () => setAltOrbit(false)
 
+    const onCancel = (e: PointerEvent) => {
+      touches.delete(e.pointerId)
+      cancelLongPress()
+      if (drag?.touch) drag = null
+    }
     root.addEventListener('pointerdown', onDown, true)
+    window.addEventListener('pointercancel', onCancel)
     root.addEventListener('wheel', onWheel, { capture: true, passive: false })
     root.addEventListener('contextmenu', onContext)
     window.addEventListener('pointermove', onMove)
@@ -1453,6 +1569,8 @@ function Controller({ registry, cage, gizmo, container, mouse, menuOpen, onMenu,
       root.removeEventListener('contextmenu', onContext)
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onCancel)
+      cancelLongPress()
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
       window.removeEventListener('blur', onBlur)
@@ -1493,7 +1611,7 @@ function SceneContent(props: Omit<ControllerProps, 'registry' | 'cage' | 'gizmo'
           <ObjectView
             key={o.id}
             obj={o}
-            materials={doc.materials}
+            doc={doc}
             selected={selected.includes(o.id)}
             active={o.id === active}
             objectMode={mode === 'object'}
@@ -1692,7 +1810,17 @@ export function ModelerViewport() {
         <span className="rounded bg-black/40 px-1.5 py-0.5">{mode === 'edit' ? 'Edit Mode' : 'Object Mode'} · Perspective</span>
       </div>
       {status && (
-        <div className="pointer-events-none absolute right-2 bottom-2 left-2 z-20 truncate rounded-md bg-black/70 px-3 py-1.5 font-mono text-[11px] text-ink-100">{status}</div>
+        <>
+          <div className="absolute bottom-11 left-1/2 z-30 flex -translate-x-1/2 gap-2">
+            <button type="button" onClick={() => viewport.current?.cancelModal()} className="flex h-10 items-center gap-1.5 rounded-full border border-ink-600 bg-ink-900/95 px-4 text-[12px] font-medium text-ink-200 shadow-lg hover:bg-ink-800">
+              <X className="h-4 w-4" /> Cancel
+            </button>
+            <button type="button" onClick={() => viewport.current?.confirmModal()} className="flex h-10 items-center gap-1.5 rounded-full bg-brand-500 px-4 text-[12px] font-semibold text-white shadow-lg hover:bg-brand-400">
+              <Check className="h-4 w-4" /> Confirm
+            </button>
+          </div>
+          <div className="pointer-events-none absolute right-2 bottom-2 left-2 z-20 rounded-md bg-black/70 px-3 py-1.5 font-mono text-[11px] text-ink-100 sm:truncate">{status}</div>
+        </>
       )}
       {menu && <PopupMenu x={menu.x} y={menu.y} title={menu.title} items={menu.items} onClose={closeMenu} />}
     </div>

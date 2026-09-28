@@ -34,8 +34,11 @@ export interface ViewportApi {
   zoomBy: (factor: number) => void
   frameSelected: () => void
   frameAll: () => void
-  /** Opens a viewport menu at the last mouse position. */
-  openMenu: (menu: 'add' | 'delete' | 'merge' | 'context' | 'snap' | 'apply') => void
+  /** Opens a viewport menu at a screen point (default: the last pointer position). */
+  openMenu: (menu: 'add' | 'delete' | 'merge' | 'context' | 'snap' | 'apply', at?: { clientX: number; clientY: number }) => void
+  /** Ends the running G / R / S, extrude, inset or loop cut (touch buttons). */
+  confirmModal: () => void
+  cancelModal: () => void
   /** Camera rotation, read every frame by the navigation gizmo. */
   cameraQuaternion: THREE.Quaternion
 }

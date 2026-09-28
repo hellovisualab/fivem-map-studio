@@ -1,8 +1,8 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react'
 import * as THREE from 'three'
-import { ArrowDown, ArrowUp, Box, Check, Eye, EyeOff, ImagePlus, Palette, Plus, Shield, SlidersHorizontal, Trash2, Triangle, Wrench, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, Copy, Eye, EyeOff, ImagePlus, PencilRuler, Plus, Shield, Trash2, Triangle, Wrench, X } from 'lucide-react'
 import { evaluateObject, objectMatrix } from '@/lib/modeler/build'
-import { MODIFIER_LABELS, docBounds, docStats } from '@/lib/modeler/doc'
+import { MODIFIER_GROUPS, MODIFIER_LABELS, docBounds, docStats } from '@/lib/modeler/doc'
 import { meshBounds, meshStats } from '@/lib/modeler/mesh'
 import {
   addCollisionBox,
@@ -11,6 +11,8 @@ import {
   applyModifierById,
   applyTransforms,
   assignMaterial,
+  duplicateModifier,
+  setBooleanTarget,
   cubeProjectSelection,
   dropToGround,
   mergeVerts,
@@ -33,6 +35,7 @@ import {
 } from '@/lib/modeler/ops'
 import type { ModelMaterial, ModelObject, Modifier, Vec3 } from '@/lib/modeler/types'
 import { activeObject, useModeler, withObject } from '@/store/useModeler'
+import { PANEL_TABS, type PanelTab } from '@/components/modeler/panelTabs'
 import { toast } from '@/components/ui/Toast'
 import { cn, readFileAsDataURL, loadImage } from '@/lib/utils'
 
@@ -124,7 +127,7 @@ export function NumInput({
     if (Number.isFinite(n)) onChange(clampV(n), true)
   }
   return (
-    <label className={cn('flex h-7 min-w-0 items-center overflow-hidden rounded-md border border-ink-700 bg-ink-900 text-[11px] focus-within:border-brand-500/70', className)}>
+    <label className={cn('flex h-7 min-w-0 items-center overflow-hidden rounded-md border border-ink-700 bg-ink-900 text-[11px] focus-within:border-brand-500/70 pointer-coarse:h-9', className)}>
       {label && (
         <span
           className="flex h-full cursor-ew-resize items-center px-1.5 font-medium text-ink-400 select-none hover:bg-ink-800 hover:text-ink-200"
@@ -153,7 +156,7 @@ export function NumInput({
         </span>
       )}
       <input
-        className="h-full w-full min-w-0 bg-transparent px-1.5 text-right font-mono text-ink-100 outline-none"
+        className="h-full w-full min-w-0 bg-transparent px-1.5 text-right font-mono text-ink-100 outline-none pointer-coarse:text-[16px]"
         value={shown}
         inputMode="decimal"
         onFocus={(e) => {
@@ -221,7 +224,7 @@ function SmallButton({ children, onClick, active, title, danger, className }: { 
       title={title}
       onClick={onClick}
       className={cn(
-        'inline-flex h-7 items-center justify-center gap-1 rounded-md border px-2 text-[11px] transition',
+        'inline-flex h-7 items-center justify-center gap-1 rounded-md border px-2 text-[11px] transition pointer-coarse:h-9',
         active ? 'border-brand-500/60 bg-brand-500/15 text-brand-200' : danger ? 'border-red-500/30 text-red-300 hover:bg-red-500/10' : 'border-ink-700 bg-ink-900 text-ink-300 hover:border-ink-500 hover:text-white',
         className,
       )}
@@ -234,14 +237,14 @@ function SmallButton({ children, onClick, active, title, danger, className }: { 
 /* ---------------------------------------------------------------------------------------- */
 /* Outliner                                                                                  */
 
-function Outliner() {
+function Outliner({ tall }: { tall?: boolean }) {
   const objects = useModeler((s) => s.doc.objects)
   const selected = useModeler((s) => s.selected)
   const active = useModeler((s) => s.active)
   const mode = useModeler((s) => s.mode)
   const [renaming, setRenaming] = useState<string | null>(null)
   return (
-    <div className="max-h-[210px] min-h-[92px] overflow-auto rounded-lg border border-ink-800 bg-ink-900/50 py-1">
+    <div className={cn('overflow-auto rounded-lg border border-ink-800 bg-ink-900/50 py-1', tall ? 'min-h-[120px]' : 'max-h-[210px] min-h-[92px]')}>
       {!objects.length && <p className="px-3 py-4 text-center text-[11px] text-ink-500">Empty scene · Shift+A to add</p>}
       {objects.map((o) => (
         <div
@@ -254,11 +257,11 @@ function Outliner() {
           }}
           onDoubleClick={() => setRenaming(o.id)}
           className={cn(
-            'flex cursor-default items-center gap-2 px-2 py-1 text-[12px]',
+            'flex cursor-default items-center gap-2 px-2 py-1 text-[12px] pointer-coarse:py-2.5',
             o.id === active ? 'bg-brand-500/15 text-white' : selected.includes(o.id) ? 'bg-white/5 text-ink-100' : 'text-ink-300 hover:bg-white/5',
           )}
         >
-          {o.role === 'collision' ? <Shield className="h-3.5 w-3.5 shrink-0 text-accent-400" /> : <Triangle className="h-3.5 w-3.5 shrink-0 text-orange-300" />}
+          {o.role === 'collision' ? <Shield className="h-3.5 w-3.5 shrink-0 text-accent-400" /> : o.role === 'helper' ? <PencilRuler className="h-3.5 w-3.5 shrink-0 text-ink-400" /> : <Triangle className="h-3.5 w-3.5 shrink-0 text-orange-300" />}
           {renaming === o.id ? (
             <input
               autoFocus
@@ -284,7 +287,7 @@ function Outliner() {
           <button
             type="button"
             title={o.visible ? 'Hide (H)' : 'Show'}
-            className="text-ink-500 hover:text-white"
+            className="flex h-6 w-6 items-center justify-center text-ink-500 hover:text-white"
             onClick={(e) => {
               e.stopPropagation()
               updateObject(o.id, { visible: !o.visible })
@@ -304,11 +307,12 @@ function Outliner() {
 function ObjectTab({ obj }: { obj: ModelObject }) {
   const mode = useModeler((s) => s.mode)
   const meshSel = useModeler((s) => s.meshSel)
+  const doc = useModeler((s) => s.doc)
   const set = (patch: Partial<ModelObject>, final: boolean) => updateObject(obj.id, patch, final && !st().txn)
   const localSize = useMemo(() => {
-    const { min, max } = meshBounds(evaluateObject(obj))
+    const { min, max } = meshBounds(evaluateObject(obj, doc))
     return [max[0] - min[0], max[1] - min[1], max[2] - min[2]] as Vec3
-  }, [obj])
+  }, [obj, doc])
   const dims: Vec3 = [localSize[0] * Math.abs(obj.scale[0]), localSize[1] * Math.abs(obj.scale[1]), localSize[2] * Math.abs(obj.scale[2])]
 
   const median = useMemo(() => {
@@ -331,12 +335,15 @@ function ObjectTab({ obj }: { obj: ModelObject }) {
         <span className="text-[10px] font-semibold tracking-wider text-ink-500 uppercase">Name</span>
         <input key={obj.id + obj.name} className="field field-sm mt-1" defaultValue={obj.name} onBlur={(e) => renameObject(obj.id, e.target.value)} onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
       </label>
-      <div className="grid grid-cols-2 gap-1">
-        <SmallButton active={obj.role === 'visual'} onClick={() => setRole(obj.id, 'visual')} title="Rendered in game">
+      <div className="grid grid-cols-3 gap-1">
+        <SmallButton active={obj.role === 'visual'} onClick={() => setRole(obj.id, 'visual')} title="Rendered in game" className="px-1">
           <Triangle className="h-3 w-3" /> Visual
         </SmallButton>
-        <SmallButton active={obj.role === 'collision'} onClick={() => setRole(obj.id, 'collision')} title="Invisible, becomes the collision in game">
+        <SmallButton active={obj.role === 'collision'} onClick={() => setRole(obj.id, 'collision')} title="Invisible, becomes the collision in game" className="px-1">
           <Shield className="h-3 w-3" /> Collision
+        </SmallButton>
+        <SmallButton active={obj.role === 'helper'} onClick={() => setRole(obj.id, 'helper')} title="Modelling aid (boolean cutter): drawn as wire, not exported" className="px-1">
+          <PencilRuler className="h-3 w-3" /> Helper
         </SmallButton>
       </div>
       {median && (
@@ -389,34 +396,62 @@ function ObjectTab({ obj }: { obj: ModelObject }) {
   )
 }
 
-function ModifierCard({ mod, index, count }: { mod: Modifier; index: number; count: number }) {
-  const up = (patch: Partial<Modifier>, final = true) => {
-    const obj = activeObject(st())
-    if (!obj) return
-    if (final && !st().txn) updateModifier(mod.id, patch)
-    else st().live({ doc: withObject(st().doc, obj.id, (o) => ({ ...o, modifiers: o.modifiers.map((m) => (m.id === mod.id ? ({ ...m, ...patch } as Modifier) : m)) })) })
-  }
+function Choice<T extends string | number>({ value, options, onChange }: { value: T; options: { id: T; label: string; title?: string }[]; onChange: (v: T) => void }) {
   return (
-    <Section
-      title={MODIFIER_LABELS[mod.kind]}
-      right={
-        <div className="flex items-center gap-0.5">
-          <button type="button" title={mod.enabled ? 'Disable' : 'Enable'} className={cn('rounded p-1', mod.enabled ? 'text-brand-300' : 'text-ink-600')} onClick={() => updateModifier(mod.id, { enabled: !mod.enabled })}>
-            <Eye className="h-3.5 w-3.5" />
-          </button>
-          <button type="button" title="Move up" disabled={index === 0} className="rounded p-1 text-ink-400 hover:text-white disabled:opacity-30" onClick={() => moveModifier(mod.id, -1)}>
-            <ArrowUp className="h-3.5 w-3.5" />
-          </button>
-          <button type="button" title="Move down" disabled={index === count - 1} className="rounded p-1 text-ink-400 hover:text-white disabled:opacity-30" onClick={() => moveModifier(mod.id, 1)}>
-            <ArrowDown className="h-3.5 w-3.5" />
-          </button>
-          <button type="button" title="Remove" className="rounded p-1 text-ink-400 hover:text-red-300" onClick={() => removeModifier(mod.id)}>
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      }
-    >
-      {mod.kind === 'mirror' && (
+    <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
+      {options.map((o) => (
+        <SmallButton key={String(o.id)} active={value === o.id} title={o.title} onClick={() => onChange(o.id)} className="px-1">
+          {o.label}
+        </SmallButton>
+      ))}
+    </div>
+  )
+}
+
+const AXES = [
+  { id: 0 as const, label: 'X' },
+  { id: 1 as const, label: 'Y' },
+  { id: 2 as const, label: 'Z' },
+]
+
+function Hint({ children }: { children: ReactNode }) {
+  return <p className="text-[10px] leading-relaxed text-ink-500">{children}</p>
+}
+
+function BooleanTarget({ mod }: { mod: Extract<Modifier, { kind: 'boolean' }> }) {
+  const objects = useModeler((s) => s.doc.objects)
+  const active = useModeler((s) => s.active)
+  const target = objects.find((o) => o.id === mod.target)
+  const others = objects.filter((o) => o.id !== active)
+  return (
+    <>
+      <label className="block text-[10px] text-ink-500">
+        Object (cutter)
+        <select className="field field-sm mt-0.5" value={mod.target ?? ''} onChange={(e) => setBooleanTarget(mod.id, e.target.value || null, true)}>
+          <option value="">Pick an object…</option>
+          {others.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.name}
+              {o.role === 'helper' ? ' (helper)' : ''}
+            </option>
+          ))}
+        </select>
+      </label>
+      {!others.length && <Hint>Add another object (Shift+A) to cut with, e.g. a cylinder for a hole.</Hint>}
+      {target && target.role !== 'helper' && (
+        <SmallButton className="w-full" onClick={() => setRole(target.id, 'helper')} title="Show the cutter as wire and leave it out of the export">
+          Make “{target.name}” a helper
+        </SmallButton>
+      )}
+      {target?.role === 'helper' && <Hint>“{target.name}” is a helper: drawn as wire and not exported. Move it to move the cut.</Hint>}
+    </>
+  )
+}
+
+function ModifierBody({ mod, up }: { mod: Modifier; up: (patch: Partial<Modifier>, final?: boolean) => void }) {
+  switch (mod.kind) {
+    case 'mirror':
+      return (
         <>
           <div className="grid grid-cols-3 gap-1">
             {(['X', 'Y', 'Z'] as const).map((a, i) => (
@@ -434,53 +469,233 @@ function ModifierCard({ mod, index, count }: { mod: Modifier; index: number; cou
             ))}
           </div>
           <NumInput label="Merge" value={mod.mergeDistance} step={0.0005} precision={4} min={0} suffix="m" onChange={(v, f) => up({ mergeDistance: v }, f)} />
-          <p className="text-[10px] text-ink-500">Mirrors across the object origin. Model one half; vertices on the centre line are welded.</p>
+          <Hint>Mirrors across the object origin. Model one half; vertices on the centre line are welded.</Hint>
         </>
-      )}
-      {mod.kind === 'array' && (
+      )
+    case 'array':
+      return (
         <>
           <NumInput label="Count" value={mod.count} step={0.1} precision={0} min={1} max={64} onChange={(v, f) => up({ count: Math.round(v) }, f)} />
           <Vec3Fields label="Relative offset (× size)" value={mod.relative} step={0.01} onChange={(relative, f) => up({ relative }, f)} />
           <Vec3Fields label="Constant offset" value={mod.constant} step={0.01} suffix="m" onChange={(constant, f) => up({ constant }, f)} />
         </>
-      )}
-      {mod.kind === 'subsurf' && (
+      )
+    case 'radial':
+      return (
         <>
-          <div className="grid grid-cols-4 gap-1">
-            {[0, 1, 2, 3].map((l) => (
-              <SmallButton key={l} active={mod.levels === l} onClick={() => up({ levels: l })}>
-                {l}
-              </SmallButton>
+          <NumInput label="Count" value={mod.count} step={0.1} precision={0} min={1} max={128} onChange={(v, f) => up({ count: Math.round(v) }, f)} />
+          <NumInput label="Angle" value={mod.angle} step={1} precision={1} min={-360} max={360} suffix="°" onChange={(v, f) => up({ angle: v }, f)} />
+          <Choice value={mod.axis} options={AXES} onChange={(axis) => up({ axis })} />
+          <Hint>Copies turn around the object origin. Move the mesh away from the origin in edit mode to make a ring (wheel spokes, chairs around a table).</Hint>
+        </>
+      )
+    case 'subsurf':
+      return (
+        <>
+          <Choice value={mod.levels} options={[0, 1, 2, 3].map((l) => ({ id: l, label: String(l) }))} onChange={(levels) => up({ levels })} />
+          <Hint>Each level multiplies the faces by 4 — keep props light (level 1–2). Use Shade Smooth for round results.</Hint>
+        </>
+      )
+    case 'solidify':
+      return <NumInput label="Thickness" value={mod.thickness} step={0.002} precision={4} suffix="m" onChange={(v, f) => up({ thickness: v }, f)} />
+    case 'bevel':
+      return (
+        <>
+          <NumInput label="Width" value={mod.width} step={0.001} precision={4} min={0} suffix="m" onChange={(v, f) => up({ width: v }, f)} />
+          <NumInput label="Angle" value={mod.angle} step={0.5} precision={1} min={0} max={180} suffix="°" onChange={(v, f) => up({ angle: v }, f)} />
+          <Hint>Chamfers edges sharper than the angle. Add a Subdivision Surface after it for rounded corners.</Hint>
+        </>
+      )
+    case 'boolean':
+      return (
+        <>
+          <Choice
+            value={mod.operation}
+            options={[
+              { id: 'difference', label: 'Difference', title: 'Cut the object away (holes, windows)' },
+              { id: 'union', label: 'Union', title: 'Merge both into one shell' },
+              { id: 'intersect', label: 'Intersect', title: 'Keep only the overlap' },
+            ]}
+            onChange={(operation) => up({ operation })}
+          />
+          <BooleanTarget mod={mod} />
+        </>
+      )
+    case 'decimate':
+      return (
+        <>
+          <Choice
+            value={mod.mode}
+            options={[
+              { id: 'collapse', label: 'Collapse', title: 'Keep a ratio of the vertices' },
+              { id: 'planar', label: 'Planar', title: 'Merge flat areas into n-gons' },
+            ]}
+            onChange={(mode) => up({ mode })}
+          />
+          {mod.mode === 'collapse' ? (
+            <NumInput label="Ratio" value={mod.ratio} step={0.005} precision={3} min={0.01} max={1} onChange={(v, f) => up({ ratio: v }, f)} />
+          ) : (
+            <NumInput label="Angle" value={mod.angle} step={0.2} precision={1} min={0} max={90} suffix="°" onChange={(v, f) => up({ angle: v }, f)} />
+          )}
+          <Hint>Fewer polygons for lighter props and LODs. Planar keeps the shape exactly; Collapse approximates it.</Hint>
+        </>
+      )
+    case 'triangulate':
+      return <Hint>Splits every face into triangles (what the game draws). Useful before Decimate or to check the real triangle count.</Hint>
+    case 'weld':
+      return <NumInput label="Distance" value={mod.distance} step={0.0005} precision={4} min={0} suffix="m" onChange={(v, f) => up({ distance: v }, f)} />
+    case 'wireframe':
+      return (
+        <>
+          <NumInput label="Thickness" value={mod.thickness} step={0.001} precision={4} min={0.001} suffix="m" onChange={(v, f) => up({ thickness: v }, f)} />
+          <Hint>Every edge becomes a square beam: fences, grilles, cages, scaffolding.</Hint>
+        </>
+      )
+    case 'smooth':
+      return (
+        <>
+          <NumInput label="Factor" value={mod.factor} step={0.01} precision={2} min={-2} max={2} onChange={(v, f) => up({ factor: v }, f)} />
+          <NumInput label="Repeat" value={mod.repeat} step={0.1} precision={0} min={1} max={50} onChange={(v, f) => up({ repeat: Math.round(v) }, f)} />
+        </>
+      )
+    case 'displace':
+      return (
+        <>
+          <NumInput label="Strength" value={mod.strength} step={0.002} precision={3} suffix="m" onChange={(v, f) => up({ strength: v }, f)} />
+          <NumInput label="Size" value={mod.size} step={0.005} precision={3} min={0.001} suffix="m" onChange={(v, f) => up({ size: v }, f)} />
+          <NumInput label="Seed" value={mod.seed} step={0.1} precision={0} min={0} onChange={(v, f) => up({ seed: Math.round(v) }, f)} />
+          <Hint>Noise bumps along the normals: rocks, dents, worn stone. Needs enough vertices (subdivide first).</Hint>
+        </>
+      )
+    case 'deform':
+      return (
+        <>
+          <Choice
+            value={mod.mode}
+            options={[
+              { id: 'twist', label: 'Twist' },
+              { id: 'bend', label: 'Bend' },
+              { id: 'taper', label: 'Taper' },
+              { id: 'stretch', label: 'Stretch' },
+            ]}
+            onChange={(mode) => up({ mode, factor: mode === 'twist' || mode === 'bend' ? 45 : 0.5 })}
+          />
+          <NumInput
+            label={mod.mode === 'twist' || mod.mode === 'bend' ? 'Angle' : 'Factor'}
+            value={mod.factor}
+            step={mod.mode === 'twist' || mod.mode === 'bend' ? 1 : 0.01}
+            precision={mod.mode === 'twist' || mod.mode === 'bend' ? 1 : 3}
+            suffix={mod.mode === 'twist' || mod.mode === 'bend' ? '°' : undefined}
+            onChange={(v, f) => up({ factor: v }, f)}
+          />
+          <Choice value={mod.axis} options={AXES} onChange={(axis) => up({ axis })} />
+          <Hint>Works from the bottom of the mesh along the axis. Needs loop cuts along that axis to bend smoothly.</Hint>
+        </>
+      )
+    case 'cast':
+      return (
+        <>
+          <Choice
+            value={mod.shape}
+            options={[
+              { id: 'sphere', label: 'Sphere' },
+              { id: 'cylinder', label: 'Cylinder' },
+            ]}
+            onChange={(shape) => up({ shape })}
+          />
+          <NumInput label="Factor" value={mod.factor} step={0.01} precision={2} min={-2} max={2} onChange={(v, f) => up({ factor: v }, f)} />
+        </>
+      )
+  }
+}
+
+function ModifierCard({ mod, index, count }: { mod: Modifier; index: number; count: number }) {
+  const [open, setOpen] = useState(true)
+  const up = (patch: Partial<Modifier>, final = true) => {
+    const obj = activeObject(st())
+    if (!obj) return
+    if (final && !st().txn) updateModifier(mod.id, patch)
+    else st().live({ doc: withObject(st().doc, obj.id, (o) => ({ ...o, modifiers: o.modifiers.map((m) => (m.id === mod.id ? ({ ...m, ...patch } as Modifier) : m)) })) })
+  }
+  const iconBtn = 'flex h-7 w-7 items-center justify-center rounded text-ink-400 hover:bg-white/5 hover:text-white disabled:opacity-30'
+  return (
+    <div className={cn('rounded-lg border bg-ink-900/50', mod.enabled ? 'border-ink-800' : 'border-ink-800/60 opacity-70')}>
+      <div className="flex items-center gap-0.5 px-1 py-0.5">
+        <button type="button" onClick={() => setOpen((v) => !v)} className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 py-1 text-left" aria-expanded={open}>
+          <ChevronRight className={cn('h-3.5 w-3.5 shrink-0 text-ink-500 transition', open && 'rotate-90')} />
+          <Wrench className="h-3 w-3 shrink-0 text-accent-400" />
+          <span className="truncate text-[11px] font-semibold text-ink-200">{MODIFIER_LABELS[mod.kind]}</span>
+        </button>
+        <button type="button" title={mod.enabled ? 'Hide in viewport and export' : 'Enable'} className={cn(iconBtn, mod.enabled && 'text-brand-300')} onClick={() => updateModifier(mod.id, { enabled: !mod.enabled })}>
+          {mod.enabled ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+        </button>
+        <button type="button" title="Move up" disabled={index === 0} className={iconBtn} onClick={() => moveModifier(mod.id, -1)}>
+          <ArrowUp className="h-3.5 w-3.5" />
+        </button>
+        <button type="button" title="Move down" disabled={index === count - 1} className={iconBtn} onClick={() => moveModifier(mod.id, 1)}>
+          <ArrowDown className="h-3.5 w-3.5" />
+        </button>
+        <button type="button" title="Duplicate" className={iconBtn} onClick={() => duplicateModifier(mod.id)}>
+          <Copy className="h-3.5 w-3.5" />
+        </button>
+        <button type="button" title="Remove" className={cn(iconBtn, 'hover:text-red-300')} onClick={() => removeModifier(mod.id)}>
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      {open && (
+        <div className="space-y-2 border-t border-ink-800 p-2.5">
+          <ModifierBody mod={mod} up={up} />
+          <SmallButton className="w-full" onClick={() => applyModifierById(mod.id)} title="Bake this modifier (and the ones above) into the mesh">
+            <Check className="h-3 w-3" /> Apply
+          </SmallButton>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AddModifierMenu({ onDone }: { onDone: () => void }) {
+  return (
+    <div className="space-y-2 rounded-lg border border-ink-700 bg-ink-900 p-2">
+      {MODIFIER_GROUPS.map((g) => (
+        <div key={g.label}>
+          <p className="mb-1 px-1 text-[10px] font-semibold tracking-wider text-ink-500 uppercase">{g.label}</p>
+          <div className="grid grid-cols-1 gap-0.5 sm:grid-cols-2 md:grid-cols-1">
+            {g.items.map((it) => (
+              <button
+                key={it.kind}
+                type="button"
+                onClick={() => {
+                  addModifier(it.kind)
+                  onDone()
+                }}
+                className="flex min-h-9 flex-col items-start justify-center rounded-md px-2 py-1 text-left hover:bg-brand-500/15"
+              >
+                <span className="text-[12px] text-ink-100">{MODIFIER_LABELS[it.kind]}</span>
+                <span className="text-[10px] text-ink-500">{it.hint}</span>
+              </button>
             ))}
           </div>
-          <p className="text-[10px] text-ink-500">Each level multiplies the faces by 4 — keep props light (level 1–2).</p>
-        </>
-      )}
-      {mod.kind === 'solidify' && <NumInput label="Thickness" value={mod.thickness} step={0.002} precision={4} suffix="m" onChange={(v, f) => up({ thickness: v }, f)} />}
-      <SmallButton className="w-full" onClick={() => applyModifierById(mod.id)} title="Bake this modifier (and the ones above) into the mesh">
-        <Check className="h-3 w-3" /> Apply
-      </SmallButton>
-    </Section>
+        </div>
+      ))}
+    </div>
   )
 }
 
 function ModifiersTab({ obj }: { obj: ModelObject }) {
+  const [adding, setAdding] = useState(false)
   return (
     <div className="space-y-2">
-      <select
-        className="field field-sm"
-        value=""
-        onChange={(e) => {
-          if (e.target.value) addModifier(e.target.value as Modifier['kind'])
-        }}
+      <button
+        type="button"
+        onClick={() => setAdding((v) => !v)}
+        className={cn('flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border text-[12px] font-medium', adding ? 'border-brand-500/60 bg-brand-500/15 text-brand-100' : 'border-ink-700 bg-ink-900 text-ink-200 hover:border-ink-500')}
       >
-        <option value="">Add modifier…</option>
-        <option value="mirror">Mirror</option>
-        <option value="array">Array</option>
-        <option value="subsurf">Subdivision Surface</option>
-        <option value="solidify">Solidify</option>
-      </select>
-      {!obj.modifiers.length && <p className="px-1 py-3 text-center text-[11px] text-ink-500">No modifiers. They are applied when the prop is exported.</p>}
+        <Plus className="h-3.5 w-3.5" /> Add Modifier
+        <ChevronDown className={cn('h-3.5 w-3.5 transition', adding && 'rotate-180')} />
+      </button>
+      {adding && <AddModifierMenu onDone={() => setAdding(false)} />}
+      {!obj.modifiers.length && !adding && <p className="px-1 py-3 text-center text-[11px] text-ink-500">No modifiers yet. They stay editable and are applied when the prop is exported.</p>}
       {obj.modifiers.map((m, i) => (
         <ModifierCard key={m.id} mod={m} index={i} count={obj.modifiers.length} />
       ))}
@@ -623,7 +838,8 @@ function MeshTab({ obj }: { obj: ModelObject }) {
   const mode = useModeler((s) => s.mode)
   const [tiles, setTiles] = useState(1)
   const base = useMemo(() => meshStats(obj.mesh), [obj.mesh])
-  const evaluated = useMemo(() => (obj.modifiers.some((m) => m.enabled) ? meshStats(evaluateObject(obj)) : null), [obj])
+  const doc = useModeler((s) => s.doc)
+  const evaluated = useMemo(() => (obj.modifiers.some((m) => m.enabled) ? meshStats(evaluateObject(obj, doc)) : null), [obj, doc])
   const edit = mode === 'edit'
   return (
     <div className="space-y-3">
@@ -726,49 +942,52 @@ function GtaTab() {
   )
 }
 
-type Tab = 'object' | 'modifiers' | 'material' | 'mesh' | 'gta'
-const TABS: { id: Tab; label: string; icon: ReactNode }[] = [
-  { id: 'object', label: 'Object', icon: <SlidersHorizontal className="h-3.5 w-3.5" /> },
-  { id: 'modifiers', label: 'Modifiers', icon: <Wrench className="h-3.5 w-3.5" /> },
-  { id: 'material', label: 'Material', icon: <Palette className="h-3.5 w-3.5" /> },
-  { id: 'mesh', label: 'Mesh', icon: <Box className="h-3.5 w-3.5" /> },
-  { id: 'gta', label: 'FiveM', icon: <Shield className="h-3.5 w-3.5" /> },
-]
-
-export function ModelerPanels() {
+/** The contents of one properties tab. */
+export function PanelContent({ tab }: { tab: PanelTab }) {
   const obj = useModeler((s) => activeObject(s))
-  const [tab, setTab] = useState<Tab>('object')
+  if (tab === 'outliner') return <Outliner tall />
+  if (tab === 'gta') return <GtaTab />
+  if (!obj) return <p className="px-2 py-6 text-center text-[11px] text-ink-500">Select an object (click it in the viewport or in Scene)</p>
+  if (tab === 'object') return <ObjectTab obj={obj} />
+  if (tab === 'modifiers') return <ModifiersTab obj={obj} />
+  if (tab === 'material') return <MaterialTab obj={obj} />
+  return <MeshTab obj={obj} />
+}
+
+/** Tab buttons: icon over a short label, large enough to tap. */
+export function PanelTabBar({ tabs, current, onTab, className }: { tabs: PanelTab[]; current: PanelTab | null; onTab: (t: PanelTab) => void; className?: string }) {
+  return (
+    <div className={cn('flex gap-0.5', className)} role="tablist">
+      {PANEL_TABS.filter((t) => tabs.includes(t.id)).map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          role="tab"
+          aria-selected={current === t.id}
+          title={t.label}
+          onClick={() => onTab(t.id)}
+          className={cn(
+            'flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-md py-1 text-[9px] leading-none font-medium pointer-coarse:py-1.5',
+            current === t.id ? 'bg-brand-500/20 text-brand-200' : 'text-ink-400 hover:bg-white/5 hover:text-ink-100',
+          )}
+        >
+          {t.icon}
+          <span className="max-w-full truncate">{t.label}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** Desktop and tablet sidebar: the outliner on top, property tabs below. */
+export function ModelerPanels({ tab, onTab }: { tab: PanelTab; onTab: (t: PanelTab) => void }) {
+  const current = tab === 'outliner' ? 'object' : tab
   return (
     <div className="flex h-full min-h-0 flex-col gap-2 p-2">
       <Outliner />
-      <div className="flex gap-0.5 rounded-lg border border-ink-800 bg-ink-900/60 p-0.5">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            title={t.label}
-            onClick={() => setTab(t.id)}
-            className={cn('flex flex-1 items-center justify-center gap-1 rounded-md py-1.5 text-[10px]', tab === t.id ? 'bg-brand-500/20 text-brand-200' : 'text-ink-400 hover:text-ink-100')}
-          >
-            {t.icon}
-            <span className="hidden xl:inline">{t.label}</span>
-          </button>
-        ))}
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto pr-0.5">
-        {tab === 'gta' ? (
-          <GtaTab />
-        ) : !obj ? (
-          <p className="px-2 py-6 text-center text-[11px] text-ink-500">Select an object</p>
-        ) : tab === 'object' ? (
-          <ObjectTab obj={obj} />
-        ) : tab === 'modifiers' ? (
-          <ModifiersTab obj={obj} />
-        ) : tab === 'material' ? (
-          <MaterialTab obj={obj} />
-        ) : (
-          <MeshTab obj={obj} />
-        )}
+      <PanelTabBar tabs={['object', 'modifiers', 'material', 'mesh', 'gta']} current={current} onTab={onTab} className="rounded-lg border border-ink-800 bg-ink-900/60 p-0.5" />
+      <div className="scrollbar-thin min-h-0 flex-1 overflow-auto pr-0.5 pb-2">
+        <PanelContent tab={current} />
       </div>
     </div>
   )

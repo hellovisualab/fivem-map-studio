@@ -43,10 +43,17 @@ A visual minimap editor for FiveM (GTA V) servers. Design custom minimaps in the
 
 - **Modeler (Blender-style)** – object / edit mode (`Tab`), vertex / edge / face selection (`1 2 3`), click, box and loop
   selection, `G R S` with axis constraints, typed values and snapping, extrude, inset, loop cut, subdivide, merge, fill,
-  dissolve, separate / join, normals tools, primitives (`Shift+A`), mirror / array / subdivision / solidify modifiers,
-  material slots with colour, textures (box or mesh UVs), metallic, roughness, glow and opacity, undo / redo, a 3D cursor
-  and a navigation gizmo. Objects can be marked **Collision** to draw the collision by hand. Models save as
+  dissolve, separate / join, normals tools, primitives (`Shift+A`), material slots with colour, textures (box or mesh
+  UVs), metallic, roughness, glow and opacity, undo / redo, a 3D cursor and a navigation gizmo. Objects can be marked
+  **Collision** to draw the collision by hand, or **Helper** for boolean cutters that are not exported. Models save as
   `.l7model.json`; imported GLB / OBJ / FBX / STL props can be converted into editable meshes.
+- **Modifiers** (non-destructive, applied on export) – Array, Radial Array, Bevel, Boolean (difference / union /
+  intersect with another object), Decimate (collapse / planar), Mirror, Solidify, Subdivision Surface, Triangulate,
+  Weld, Wireframe, Cast, Displace, Simple Deform (twist / bend / taper / stretch) and Smooth.
+- **Phones and tablets** – the pack view shows the viewport first with Props / Prop / Collision / LODs tabs and
+  foldable sections; the modeler has a bottom tab bar with a sliding properties sheet, tap to select, one-finger orbit,
+  long press for the tools menu, touch drags for move / extrude / inset with Confirm / Cancel buttons. On wider screens
+  the properties sidebar can be hidden with `N`.
 - **Native export** – no Blender, Sollumz or CodeWalker step: every prop becomes a `stream/<prop>.ydr` (Z-up geometry,
   shaders, embedded DXT textures, optional LODs and the embedded collision – box, sphere, convex hull or BVH mesh with a
   chosen surface material) and the pack gets a `stream/<pack>.ytyp` with the archetypes (bounds, draw distance,

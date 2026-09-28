@@ -2,7 +2,7 @@ import { Component, useCallback, useEffect, useMemo, useRef, useState, type Reac
 import { Canvas, useThree } from '@react-three/fiber'
 import { ContactShadows, GizmoHelper, GizmoViewport, Grid, OrbitControls, TransformControls } from '@react-three/drei'
 import * as THREE from 'three'
-import { Box, Copy, Maximize2, Move, Pencil, RotateCcw, Scaling, Shapes, Trash2, Upload } from 'lucide-react'
+import { Box, ChevronDown, Copy, Maximize2, Move, Pencil, RotateCcw, Scaling, Shapes, Trash2, Upload } from 'lucide-react'
 import { ToolShell } from '@/components/tools/ToolShell'
 import { Button } from '@/components/ui/Button'
 import { toast } from '@/components/ui/Toast'
@@ -12,6 +12,7 @@ import { MODEL_FILE_EXT, MATERIAL_SWATCHES, newDoc, newMaterial, parseDoc, seria
 import type { ModelDoc } from '@/lib/modeler/types'
 import { exportPropResource, surfaceOf } from '@/lib/propExport'
 import { useModeler } from '@/store/useModeler'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
 import {
   applyPropWorldTransform,
   deepCloneObject,
@@ -154,7 +155,13 @@ function CameraFitter({ tick, prop }: { tick: number; prop: PropAsset | null }) 
     const sz = Math.max(current.size[2] * Math.abs(current.scale[2]), 0.4)
     const span = Math.max(sx, sy, sz, 0.8)
     const [x, y, z] = current.position
-    camera.position.set(x + span * 1.4, y + span * 1.1, z + span * 1.4)
+    // distance that fits the prop in the narrower field of view (portrait phones included)
+    const cam = camera as THREE.PerspectiveCamera
+    const vHalf = THREE.MathUtils.degToRad(cam.fov ?? 45) / 2
+    const hHalf = Math.atan(Math.tan(vHalf) * (cam.aspect || 1))
+    const dist = Math.max((span * 1.25) / Math.tan(Math.min(vHalf, hHalf)), span * 2.5)
+    const dir = new THREE.Vector3(1.4, 1.1, 1.4).normalize()
+    camera.position.set(x + dir.x * dist, y + sy / 2 + dir.y * dist, z + dir.z * dist)
     ctrl.target.set(x, y + sy / 2, z)
     ctrl.update()
   }, [tick, camera, controls])
@@ -274,6 +281,41 @@ function Scene({
   )
 }
 
+const SECTION_KEY = 'propCreator.closedSections'
+
+function readClosed(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(SECTION_KEY) ?? '[]')
+    return Array.isArray(v) ? v : []
+  } catch {
+    return []
+  }
+}
+
+/** A side panel section that folds away; closed sections are remembered. */
+function PanelSection({ id, title, className, children }: { id: string; title: string; className?: string; children: ReactNode }) {
+  const [open, setOpen] = useState(() => !readClosed().includes(id))
+  const toggle = () => {
+    const next = !open
+    setOpen(next)
+    try {
+      const closed = readClosed().filter((x) => x !== id)
+      localStorage.setItem(SECTION_KEY, JSON.stringify(next ? closed : [...closed, id]))
+    } catch {
+      /* storage unavailable: only this session remembers */
+    }
+  }
+  return (
+    <section className={cn('border-b border-ink-800/70 pb-3 last:border-b-0', className)}>
+      <button type="button" onClick={toggle} aria-expanded={open} className="flex w-full items-center justify-between py-1.5 text-left">
+        <span className="text-[11px] font-semibold tracking-wider text-ink-500 uppercase">{title}</span>
+        <ChevronDown className={cn('h-3.5 w-3.5 text-ink-500 transition', !open && '-rotate-90')} />
+      </button>
+      {open && children}
+    </section>
+  )
+}
+
 function AxisFields({
   label,
   values,
@@ -341,6 +383,10 @@ export function PropCreator() {
   const [focusTick, setFocusTick] = useState(0)
   const [dragOver, setDragOver] = useState(false)
   const [workspace, setWorkspace] = useState<'pack' | 'model'>('pack')
+  /** Small screens show one group of the side panels at a time, under the viewport. */
+  const [mobileTab, setMobileTab] = useState<'props' | 'prop' | 'collision' | 'game'>('props')
+  const wide = useMediaQuery('(min-width: 1024px)')
+  const groupClass = (group: 'prop' | 'collision' | 'game') => (mobileTab === group ? 'block' : 'hidden lg:block')
   const [modelPropId, setModelPropId] = useState<string | null>(null)
   const [progress, setProgress] = useState<string | null>(null)
   const loadedModel = useRef<string | null>(null)
@@ -684,8 +730,8 @@ export function PropCreator() {
       exportLoading={busy}
       exportDisabled={!props.length || busy}
     >
-      <div className="flex h-full min-h-[calc(100vh-52px)] flex-col">
-      <div className="flex shrink-0 items-center gap-1 border-b border-ink-800 bg-ink-950 px-3 py-1.5">
+      <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 items-center gap-1 border-b border-ink-800 bg-ink-950 px-2 py-1.5 sm:px-3">
         {(
           [
             ['pack', 'Pack & export', Box],
@@ -706,24 +752,48 @@ export function PropCreator() {
         </span>
       </div>
       {workspace === 'model' ? (
-        <div className="h-[calc(100vh-52px-41px)] min-h-[560px]">
+        <div className="min-h-[480px] flex-1">
           <ModelerWorkspace name={modelProp?.name ?? 'model'} onDone={closeModeler} />
         </div>
       ) : (
-      <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[240px_1fr_300px]">
-        <aside className="flex flex-col border-b border-ink-800 lg:border-r lg:border-b-0">
+      <div className="flex flex-1 flex-col lg:grid lg:min-h-0 lg:grid-cols-[240px_minmax(0,1fr)_300px]">
+        <div className="sticky top-0 z-20 order-2 flex gap-1 border-y border-ink-800 bg-ink-950/95 p-1.5 backdrop-blur lg:hidden" role="tablist">
+          {(
+            [
+              ['props', `Props (${props.length})`],
+              ['prop', 'Prop'],
+              ['collision', 'Collision'],
+              ['game', 'LODs & game'],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={mobileTab === id}
+              onClick={() => setMobileTab(id)}
+              className={cn('min-w-0 flex-1 truncate rounded-lg px-1 py-2 text-[11px] font-medium', mobileTab === id ? 'bg-brand-500/20 text-brand-200' : 'text-ink-400 hover:bg-white/5')}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <aside className={cn('order-3 flex-col border-ink-800 lg:order-1 lg:flex lg:min-h-0 lg:border-r', mobileTab === 'props' ? 'flex' : 'hidden')}>
           <div className="border-b border-ink-800 px-3 py-3">
             <p className="text-xs font-semibold tracking-wider text-ink-500 uppercase">Resource</p>
             <input className="field field-sm mt-2" value={projectName} onChange={(e) => setProjectName(e.target.value)} placeholder="Resource name" />
           </div>
-          <div className="flex-1 space-y-1 overflow-auto p-2">
+          <div className="flex-1 space-y-1 p-2 lg:overflow-auto">
             {!props.length && <p className="px-2 py-6 text-center text-xs text-ink-500">No props yet — drop a model below.</p>}
             {props.map((p) => (
               <button
                 key={p.id}
                 type="button"
-                onClick={() => setSelectedId(p.id)}
-                className={cn('flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm', selectedId === p.id ? 'bg-brand-500/15 text-brand-300' : 'text-ink-300 hover:bg-ink-850')}
+                onClick={() => {
+                  setSelectedId(p.id)
+                  if (!wide) setMobileTab('prop')
+                }}
+                className={cn('flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm pointer-coarse:py-3', selectedId === p.id ? 'bg-brand-500/15 text-brand-300' : 'text-ink-300 hover:bg-ink-850')}
               >
                 <Box className="h-4 w-4 shrink-0" />
                 <span className="min-w-0 flex-1">
@@ -777,7 +847,7 @@ export function PropCreator() {
         </aside>
 
         <div
-          className="relative min-h-[360px] bg-[#0a0a0e]"
+          className="relative order-1 h-[46vh] min-h-[280px] shrink-0 bg-[#0a0a0e] lg:order-2 lg:h-auto lg:min-h-[360px]"
           onDragOver={(e) => {
             e.preventDefault()
             setDragOver(true)
@@ -851,9 +921,8 @@ export function PropCreator() {
           </CanvasErrorBoundary>
         </div>
 
-        <aside className="space-y-4 overflow-auto border-t border-ink-800 p-3 lg:border-t-0 lg:border-l">
-          <div>
-            <p className="text-[11px] font-semibold tracking-wider text-ink-500 uppercase">Prop</p>
+        <aside className={cn('order-4 space-y-1 border-ink-800 p-3 lg:order-3 lg:block lg:overflow-auto lg:border-l', mobileTab === 'props' && 'hidden')}>
+          <PanelSection id="prop" title="Prop" className={groupClass('prop')}>
             {!selected ? (
               <p className="mt-2 text-xs text-ink-500">Select a prop</p>
             ) : (
@@ -901,10 +970,9 @@ export function PropCreator() {
                 </div>
               </div>
             )}
-          </div>
+          </PanelSection>
 
-          <div>
-            <p className="text-[11px] font-semibold tracking-wider text-ink-500 uppercase">Transform</p>
+          <PanelSection id="transform" title="Transform" className={groupClass('prop')}>
             {!selected ? (
               <p className="mt-2 text-xs text-ink-500">Select a prop</p>
             ) : (
@@ -940,10 +1008,9 @@ export function PropCreator() {
                 </Button>
               </div>
             )}
-          </div>
+          </PanelSection>
 
-          <div>
-            <p className="text-[11px] font-semibold tracking-wider text-ink-500 uppercase">Materials</p>
+          <PanelSection id="materials" title="Materials" className={groupClass('prop')}>
             {!selected ? (
               <p className="mt-2 text-xs text-ink-500">No materials — add a prop first.</p>
             ) : selected.model ? (
@@ -1052,10 +1119,9 @@ export function PropCreator() {
                 />
               </div>
             )}
-          </div>
+          </PanelSection>
 
-          <div>
-            <p className="text-[11px] font-semibold tracking-wider text-ink-500 uppercase">Collision</p>
+          <PanelSection id="collision" title="Collision" className={groupClass('collision')}>
             {!selected ? (
               <p className="mt-2 text-xs text-ink-500">Select a prop</p>
             ) : (
@@ -1112,24 +1178,22 @@ export function PropCreator() {
                 </label>
               </div>
             )}
-          </div>
+            {selected && selected.collision !== 'none' && (
+              <label className="mt-3 block text-[10px] text-ink-500">
+                Collision surface (sounds, bullet impacts, weight)
+                <select className="field field-sm mt-0.5" value={selected.surface ?? ''} onChange={(e) => patchProp(selected.id, { surface: e.target.value === '' ? undefined : Number(e.target.value) })}>
+                  <option value="">Auto · {SURFACES.find((x) => x.id === surfaceOf(selected))?.label}</option>
+                  {SURFACES.map((x) => (
+                    <option key={x.id} value={x.id}>
+                      {x.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </PanelSection>
 
-          {selected && selected.collision !== 'none' && (
-            <label className="block text-[10px] text-ink-500">
-              Collision surface (sounds, bullet impacts, weight)
-              <select className="field field-sm mt-0.5" value={selected.surface ?? ''} onChange={(e) => patchProp(selected.id, { surface: e.target.value === '' ? undefined : Number(e.target.value) })}>
-                <option value="">Auto · {SURFACES.find((x) => x.id === surfaceOf(selected))?.label}</option>
-                {SURFACES.map((x) => (
-                  <option key={x.id} value={x.id}>
-                    {x.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-
-          <div>
-            <p className="text-[11px] font-semibold tracking-wider text-ink-500 uppercase">LODs & spawn</p>
+          <PanelSection id="game" title="LODs & spawn" className={groupClass('game')}>
             {!selected ? (
               <p className="mt-2 text-xs text-ink-500">Select a prop</p>
             ) : (
@@ -1178,7 +1242,7 @@ export function PropCreator() {
                 </label>
               </div>
             )}
-          </div>
+          </PanelSection>
         </aside>
       </div>
       )}

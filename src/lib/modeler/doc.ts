@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { objectMatrix } from '@/lib/modeler/build'
+import { evaluateObject, modifierContext, objectMatrix } from '@/lib/modeler/build'
 import { cloneMesh, flipFaces, joinMeshes, meshBounds, meshStats } from '@/lib/modeler/mesh'
 import { applyModifiers } from '@/lib/modeler/modifiers'
 import { makePrimitive, type PrimitiveKind } from '@/lib/modeler/primitives'
@@ -174,33 +174,96 @@ export function joinObjects(target: ModelObject, others: ModelObject[]): ModelOb
 }
 
 /** Bakes one modifier (or the whole stack up to it) into the mesh (Apply). */
-export function applyModifier(obj: ModelObject, id: string): ModelObject {
+export function applyModifier(obj: ModelObject, id: string, doc?: ModelDoc): ModelObject {
   const idx = obj.modifiers.findIndex((m) => m.id === id)
   if (idx < 0) return obj
   const stack = obj.modifiers.slice(0, idx + 1)
-  return { ...obj, mesh: applyModifiers(obj.mesh, stack), modifiers: obj.modifiers.slice(idx + 1) }
+  return { ...obj, mesh: applyModifiers(obj.mesh, stack, doc ? modifierContext(obj, doc) : undefined), modifiers: obj.modifiers.slice(idx + 1) }
 }
 
 export function newModifier(kind: Modifier['kind']): Modifier {
   const id = uid(6)
+  const enabled = true
   switch (kind) {
     case 'mirror':
-      return { id, kind, enabled: true, axes: [true, false, false], mergeDistance: 0.001 }
+      return { id, kind, enabled, axes: [true, false, false], mergeDistance: 0.001 }
     case 'array':
-      return { id, kind, enabled: true, count: 2, relative: [1, 0, 0], constant: [0, 0, 0] }
+      return { id, kind, enabled, count: 2, relative: [1, 0, 0], constant: [0, 0, 0] }
+    case 'radial':
+      return { id, kind, enabled, count: 6, angle: 360, axis: 2 }
     case 'subsurf':
-      return { id, kind, enabled: true, levels: 1 }
+      return { id, kind, enabled, levels: 1 }
     case 'solidify':
-      return { id, kind, enabled: true, thickness: 0.05 }
+      return { id, kind, enabled, thickness: 0.05 }
+    case 'bevel':
+      return { id, kind, enabled, width: 0.02, angle: 30 }
+    case 'boolean':
+      return { id, kind, enabled, operation: 'difference', target: null }
+    case 'decimate':
+      return { id, kind, enabled, mode: 'collapse', ratio: 0.5, angle: 5 }
+    case 'triangulate':
+      return { id, kind, enabled }
+    case 'weld':
+      return { id, kind, enabled, distance: 0.001 }
+    case 'wireframe':
+      return { id, kind, enabled, thickness: 0.02 }
+    case 'smooth':
+      return { id, kind, enabled, factor: 0.5, repeat: 1 }
+    case 'displace':
+      return { id, kind, enabled, strength: 0.05, size: 0.3, seed: 1 }
+    case 'deform':
+      return { id, kind, enabled, mode: 'twist', factor: 45, axis: 2 }
+    case 'cast':
+      return { id, kind, enabled, shape: 'sphere', factor: 0.5 }
   }
 }
 
 export const MODIFIER_LABELS: Record<Modifier['kind'], string> = {
   mirror: 'Mirror',
   array: 'Array',
+  radial: 'Radial Array',
   subsurf: 'Subdivision Surface',
   solidify: 'Solidify',
+  bevel: 'Bevel',
+  boolean: 'Boolean',
+  decimate: 'Decimate',
+  triangulate: 'Triangulate',
+  weld: 'Weld',
+  wireframe: 'Wireframe',
+  smooth: 'Smooth',
+  displace: 'Displace',
+  deform: 'Simple Deform',
+  cast: 'Cast',
 }
+
+/** Add-modifier menu, grouped like Blender's. */
+export const MODIFIER_GROUPS: { label: string; items: { kind: Modifier['kind']; hint: string }[] }[] = [
+  {
+    label: 'Generate',
+    items: [
+      { kind: 'array', hint: 'Copies in a row' },
+      { kind: 'radial', hint: 'Copies around a circle' },
+      { kind: 'bevel', hint: 'Chamfer sharp edges' },
+      { kind: 'boolean', hint: 'Cut, join or intersect with an object' },
+      { kind: 'decimate', hint: 'Fewer polygons' },
+      { kind: 'mirror', hint: 'Model one half' },
+      { kind: 'solidify', hint: 'Give surfaces a thickness' },
+      { kind: 'subsurf', hint: 'Smooth, rounder shapes' },
+      { kind: 'triangulate', hint: 'All faces to triangles' },
+      { kind: 'weld', hint: 'Merge vertices by distance' },
+      { kind: 'wireframe', hint: 'Edges become beams' },
+    ],
+  },
+  {
+    label: 'Deform',
+    items: [
+      { kind: 'cast', hint: 'Towards a sphere or cylinder' },
+      { kind: 'displace', hint: 'Noise bumps (rocks, dents)' },
+      { kind: 'deform', hint: 'Twist, bend, taper, stretch' },
+      { kind: 'smooth', hint: 'Relax the shape' },
+    ],
+  },
+]
 
 /** Document space bounds of the objects (modifiers applied). */
 export function docBounds(doc: ModelDoc, filter?: (o: ModelObject) => boolean) {
@@ -209,8 +272,7 @@ export function docBounds(doc: ModelDoc, filter?: (o: ModelObject) => boolean) {
   for (const o of doc.objects) {
     if (filter && !filter(o)) continue
     const m = matrixOf(o)
-    const mesh = o.modifiers.some((x) => x.enabled) ? applyModifiers(o.mesh, o.modifiers) : o.mesh
-    for (const p of mesh.verts) box.expandByPoint(v.set(p[0], p[1], p[2]).applyMatrix4(m))
+    for (const p of evaluateObject(o, doc).verts) box.expandByPoint(v.set(p[0], p[1], p[2]).applyMatrix4(m))
   }
   return box
 }
@@ -221,7 +283,7 @@ export function docStats(doc: ModelDoc) {
   let tris = 0
   for (const o of doc.objects) {
     if (o.role !== 'visual') continue
-    const mesh = o.modifiers.some((x) => x.enabled) ? applyModifiers(o.mesh, o.modifiers) : o.mesh
+    const mesh = evaluateObject(o, doc)
     const s = meshStats(mesh)
     verts += s.verts
     faces += s.faces

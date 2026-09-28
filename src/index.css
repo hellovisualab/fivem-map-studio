@@ -123,6 +123,13 @@
     background: var(--color-ink-600);
     border-radius: 999px;
   }
+  /* Horizontally scrolling toolbars on small screens. */
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
   .grid-bg {
     background-image:
       linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),

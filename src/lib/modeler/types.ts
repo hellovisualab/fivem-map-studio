@@ -22,21 +22,37 @@ export interface EditMesh {
   faces: Face[]
 }
 
-export type ModifierKind = 'mirror' | 'array' | 'subsurf' | 'solidify'
+export type ModifierKind =
+  | 'mirror'
+  | 'array'
+  | 'radial'
+  | 'subsurf'
+  | 'solidify'
+  | 'bevel'
+  | 'boolean'
+  | 'decimate'
+  | 'triangulate'
+  | 'weld'
+  | 'wireframe'
+  | 'smooth'
+  | 'displace'
+  | 'deform'
+  | 'cast'
 
-export interface MirrorModifier {
+interface ModifierBase {
   id: string
-  kind: 'mirror'
   enabled: boolean
+}
+
+export interface MirrorModifier extends ModifierBase {
+  kind: 'mirror'
   axes: [boolean, boolean, boolean]
   /** Welds vertices closer than this to the mirror plane. */
   mergeDistance: number
 }
 
-export interface ArrayModifier {
-  id: string
+export interface ArrayModifier extends ModifierBase {
   kind: 'array'
-  enabled: boolean
   count: number
   /** Offset in object-size units (relative) per copy. */
   relative: Vec3
@@ -44,21 +60,109 @@ export interface ArrayModifier {
   constant: Vec3
 }
 
-export interface SubsurfModifier {
-  id: string
+/** Copies rotated around an axis through the object origin (wheels, fences around a pole). */
+export interface RadialArrayModifier extends ModifierBase {
+  kind: 'radial'
+  count: number
+  /** Total angle in degrees (360 = full circle). */
+  angle: number
+  axis: 0 | 1 | 2
+}
+
+export interface SubsurfModifier extends ModifierBase {
   kind: 'subsurf'
-  enabled: boolean
   levels: number
 }
 
-export interface SolidifyModifier {
-  id: string
+export interface SolidifyModifier extends ModifierBase {
   kind: 'solidify'
-  enabled: boolean
   thickness: number
 }
 
-export type Modifier = MirrorModifier | ArrayModifier | SubsurfModifier | SolidifyModifier
+/** Chamfers the edges sharper than `angle` degrees. */
+export interface BevelModifier extends ModifierBase {
+  kind: 'bevel'
+  width: number
+  angle: number
+}
+
+export type BooleanOperation = 'difference' | 'union' | 'intersect'
+
+export interface BooleanModifier extends ModifierBase {
+  kind: 'boolean'
+  operation: BooleanOperation
+  /** Object used as the cutter / second operand. */
+  target: string | null
+}
+
+export interface DecimateModifier extends ModifierBase {
+  kind: 'decimate'
+  /** collapse: keep `ratio` of the vertices; planar: merge faces flatter than `angle`. */
+  mode: 'collapse' | 'planar'
+  ratio: number
+  angle: number
+}
+
+export interface TriangulateModifier extends ModifierBase {
+  kind: 'triangulate'
+}
+
+export interface WeldModifier extends ModifierBase {
+  kind: 'weld'
+  distance: number
+}
+
+export interface WireframeModifier extends ModifierBase {
+  kind: 'wireframe'
+  thickness: number
+}
+
+export interface SmoothModifier extends ModifierBase {
+  kind: 'smooth'
+  factor: number
+  repeat: number
+}
+
+export interface DisplaceModifier extends ModifierBase {
+  kind: 'displace'
+  strength: number
+  /** Noise feature size in metres. */
+  size: number
+  seed: number
+}
+
+export type DeformMode = 'twist' | 'bend' | 'taper' | 'stretch'
+
+export interface DeformModifier extends ModifierBase {
+  kind: 'deform'
+  mode: DeformMode
+  /** Degrees for twist / bend, factor for taper / stretch. */
+  factor: number
+  axis: 0 | 1 | 2
+}
+
+export interface CastModifier extends ModifierBase {
+  kind: 'cast'
+  shape: 'sphere' | 'cylinder'
+  factor: number
+}
+
+export type Modifier =
+  | MirrorModifier
+  | ArrayModifier
+  | RadialArrayModifier
+  | SubsurfModifier
+  | SolidifyModifier
+  | BevelModifier
+  | BooleanModifier
+  | DecimateModifier
+  | TriangulateModifier
+  | WeldModifier
+  | WireframeModifier
+  | SmoothModifier
+  | DisplaceModifier
+  | DeformModifier
+  | CastModifier
 
 export interface ModelMaterial {
   id: string
@@ -80,7 +184,8 @@ export interface ModelMaterial {
   doubleSided: boolean
 }
 
-export type ObjectRole = 'visual' | 'collision'
+/** visual: rendered in game; collision: invisible collision; helper: modelling aid (boolean cutters), not exported. */
+export type ObjectRole = 'visual' | 'collision' | 'helper'
 
 export interface ModelObject {
   id: string
