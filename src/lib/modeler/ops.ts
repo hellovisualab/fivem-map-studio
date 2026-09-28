@@ -241,9 +241,43 @@ export function renameObject(id: string, name: string) {
 
 /* Modifiers */
 
+/**
+ * Adds a modifier to the active object. A Boolean uses another selected object as its
+ * cutter (like Blender's selected-to-active) and turns that object into a helper.
+ */
 export function addModifier(kind: Modifier['kind']) {
+  const s = st()
+  const obj = activeObject(s)
+  if (!obj) return
+  const mod = newModifier(kind)
+  let doc = s.doc
+  if (mod.kind === 'boolean') {
+    const other = s.selected.find((id) => id !== obj.id && doc.objects.some((o) => o.id === id))
+    if (other) {
+      mod.target = other
+      doc = withObject(doc, other, (o) => ({ ...o, role: 'helper' }))
+    }
+  }
+  s.commit({ doc: withObject(doc, obj.id, (o) => ({ ...o, modifiers: [...o.modifiers, mod] })), selected: mod.kind === 'boolean' ? [obj.id] : s.selected })
+}
+
+export function duplicateModifier(id: string) {
   const obj = activeObject(st())
-  if (obj) updateObject(obj.id, { modifiers: [...obj.modifiers, newModifier(kind)] })
+  if (!obj) return
+  const i = obj.modifiers.findIndex((m) => m.id === id)
+  if (i < 0) return
+  const copy = { ...structuredClone(obj.modifiers[i]), id: newModifier(obj.modifiers[i].kind).id } as Modifier
+  updateObject(obj.id, { modifiers: [...obj.modifiers.slice(0, i + 1), copy, ...obj.modifiers.slice(i + 1)] })
+}
+
+/** Points a Boolean at `target`; the cutter becomes a helper (wire, not exported) when asked. */
+export function setBooleanTarget(modId: string, target: string | null, makeHelper: boolean) {
+  const s = st()
+  const obj = activeObject(s)
+  if (!obj) return
+  let doc = withObject(s.doc, obj.id, (o) => ({ ...o, modifiers: o.modifiers.map((m) => (m.id === modId && m.kind === 'boolean' ? { ...m, target } : m)) }))
+  if (target && makeHelper) doc = withObject(doc, target, (o) => ({ ...o, role: 'helper' }))
+  s.commit({ doc })
 }
 
 export function updateModifier(id: string, patch: Partial<Modifier>) {
@@ -271,7 +305,7 @@ export function applyModifierById(id: string) {
   const s = st()
   const obj = activeObject(s)
   if (!obj) return
-  s.commit({ doc: withObject(s.doc, obj.id, (o) => applyModifier(o, id)), meshSel: emptySelection() })
+  s.commit({ doc: withObject(s.doc, obj.id, (o) => applyModifier(o, id, s.doc)), meshSel: emptySelection() })
 }
 
 /* Materials */

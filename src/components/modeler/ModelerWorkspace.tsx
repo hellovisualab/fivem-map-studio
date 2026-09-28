@@ -10,26 +10,33 @@ import {
   Import,
   Keyboard,
   Magnet,
+  MoreHorizontal,
   MousePointer2,
   Move3d,
+  PanelRight,
+  Plus,
   Redo2,
   Rotate3d,
   Scale3d,
   ScanEye,
   Scissors,
   SquareDashed,
+  Trash2,
   Undo2,
+  X,
 } from 'lucide-react'
 import { importObject3D } from '@/lib/modeler/build'
 import { MODEL_FILE_EXT, docStats, parseDoc, serializeDoc } from '@/lib/modeler/doc'
 import { meshStats } from '@/lib/modeler/mesh'
-import { addPrimitive, setSelectMode, toggleEditMode } from '@/lib/modeler/ops'
+import { setSelectMode, toggleEditMode } from '@/lib/modeler/ops'
 import type { SelectMode } from '@/lib/modeler/types'
 import { ingestPropFiles, PROP_ACCEPT } from '@/lib/propLoad'
 import { disposeObject } from '@/lib/propGeometry'
 import { activeObject, useModeler, type ModelerTool, type Shading } from '@/store/useModeler'
 import { ModelerViewport } from '@/components/modeler/ModelerViewport'
-import { ModelerPanels } from '@/components/modeler/ModelerPanels'
+import { ModelerPanels, PanelContent, PanelTabBar } from '@/components/modeler/ModelerPanels'
+import { PANEL_TABS, type PanelTab } from '@/components/modeler/panelTabs'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { PopupMenu, type MenuItem } from '@/components/modeler/PopupMenu'
 import { addMenu, meshMenu, objectMenu, selectMenu, viewMenu } from '@/components/modeler/menus'
 import { viewport } from '@/components/modeler/bridge'
@@ -39,7 +46,7 @@ import { cn, downloadBlob, uid } from '@/lib/utils'
 
 const st = () => useModeler.getState()
 
-function IconButton({ active, title, onClick, children, disabled }: { active?: boolean; title: string; onClick: () => void; children: ReactNode; disabled?: boolean }) {
+function IconButton({ active, title, onClick, children, disabled }: { active?: boolean; title: string; onClick: (e: React.MouseEvent) => void; children: ReactNode; disabled?: boolean }) {
   return (
     <button
       type="button"
@@ -47,7 +54,7 @@ function IconButton({ active, title, onClick, children, disabled }: { active?: b
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        'flex h-7 w-7 items-center justify-center rounded-md transition disabled:opacity-30',
+        'flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition disabled:opacity-30 pointer-coarse:h-9 pointer-coarse:w-9',
         active ? 'bg-brand-500/25 text-brand-100' : 'text-ink-300 hover:bg-white/10 hover:text-white',
       )}
     >
@@ -107,7 +114,7 @@ const SHORTCUTS: [string, string][] = [
   ['Ctrl+Z · Ctrl+Shift+Z', 'Undo · redo'],
 ]
 
-function StatusBar() {
+function StatusBar({ compact }: { compact?: boolean }) {
   const doc = useModeler((s) => s.doc)
   const mode = useModeler((s) => s.mode)
   const selected = useModeler((s) => s.selected)
@@ -120,8 +127,8 @@ function StatusBar() {
       ? 'Click select · G/R/S transform · E extrude · I inset · Ctrl+R loop cut · X delete · right click menu'
       : 'Click select · G/R/S transform · Shift+A add · Tab edit mode · Shift+D duplicate · right click menu'
   return (
-    <div className="flex h-7 shrink-0 items-center gap-3 border-t border-ink-800 bg-ink-950 px-3 text-[11px] text-ink-400">
-      <span className="min-w-0 flex-1 truncate">{hint}</span>
+    <div className={cn('flex h-7 shrink-0 items-center gap-3 border-t border-ink-800 bg-ink-950 px-3 text-ink-400', compact ? 'justify-center text-[10px]' : 'text-[11px]')}>
+      {!compact && <span className="min-w-0 flex-1 truncate">{hint}</span>}
       {base ? (
         <span className="font-mono whitespace-nowrap text-ink-300">
           Verts {meshSel.verts.size}/{base.verts} · Edges {meshSel.edges.size}/{base.edges} · Faces {meshSel.faces.size}/{base.faces} · Tris {base.tris}
@@ -150,6 +157,10 @@ export function ModelerWorkspace({ name, onDone }: { name: string; onDone: () =>
   const canUndo = useModeler((s) => s.past.length > 0)
   const canRedo = useModeler((s) => s.future.length > 0)
   const hasActive = useModeler((s) => !!activeObject(s))
+  const sidebar = useModeler((s) => s.sidebar)
+  const wide = useMediaQuery('(min-width: 768px)')
+  const [tab, setTab] = useState<PanelTab>('object')
+  const [sheetOpen, setSheetOpen] = useState(false)
 
   const openAt = (e: React.MouseEvent, items: MenuItem[]) => {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
@@ -216,79 +227,99 @@ export function ModelerWorkspace({ name, onDone }: { name: string; onDone: () =>
   ]
 
   const menuButton = (label: string, items: () => MenuItem[]) => (
-    <button type="button" onClick={(e) => openAt(e, items())} className="rounded-md px-2 py-1 text-[12px] text-ink-300 hover:bg-white/10 hover:text-white">
+    <button type="button" onClick={(e) => openAt(e, items())} className="shrink-0 rounded-md px-2 py-1 text-[12px] text-ink-300 hover:bg-white/10 hover:text-white pointer-coarse:py-1.5">
       {label}
     </button>
   )
 
+  const openViewportMenu = (e: React.MouseEvent, kind: 'add' | 'context' | 'delete') => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    viewport.current?.openMenu(kind, { clientX: r.right + 6, clientY: r.top })
+  }
+
+  const toggleTab = (t: PanelTab) => {
+    if (t === tab && sheetOpen) setSheetOpen(false)
+    else {
+      setTab(t)
+      setSheetOpen(true)
+    }
+  }
+
   return (
     <div ref={root} className="relative flex h-full min-h-0 flex-col bg-ink-950">
-      <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-1 border-b border-ink-800 bg-ink-900 px-2 py-1">
-        <button
-          type="button"
-          onClick={toggleEditMode}
-          disabled={!hasActive && mode === 'object'}
-          title="Switch mode (Tab)"
-          className="flex items-center gap-1.5 rounded-md border border-ink-700 bg-ink-850 px-2 py-1 text-[12px] text-ink-100 hover:border-ink-500 disabled:opacity-40"
-        >
-          {mode === 'edit' ? <SquareDashed className="h-3.5 w-3.5 text-orange-300" /> : <Box className="h-3.5 w-3.5 text-orange-300" />}
-          {mode === 'edit' ? 'Edit Mode' : 'Object Mode'}
-          <ChevronDown className="h-3 w-3 text-ink-500" />
-        </button>
-        {mode === 'edit' && (
-          <div className="flex rounded-md border border-ink-700 bg-ink-850 p-0.5">
-            {selectModes.map((m) => (
-              <IconButton key={m.id} title={m.title} active={selectMode === m.id} onClick={() => setSelectMode(m.id)}>
-                {m.icon}
-              </IconButton>
+      <div className="flex min-h-10 shrink-0 items-center gap-1 border-b border-ink-800 bg-ink-900 px-1.5 py-1 sm:px-2">
+        <div className="scrollbar-none flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+          <button
+            type="button"
+            onClick={toggleEditMode}
+            disabled={!hasActive && mode === 'object'}
+            title="Switch mode (Tab)"
+            className="flex shrink-0 items-center gap-1.5 rounded-md border border-ink-700 bg-ink-850 px-2 py-1 text-[12px] text-ink-100 hover:border-ink-500 disabled:opacity-40 pointer-coarse:py-1.5"
+          >
+            {mode === 'edit' ? <SquareDashed className="h-3.5 w-3.5 text-orange-300" /> : <Box className="h-3.5 w-3.5 text-orange-300" />}
+            {mode === 'edit' ? 'Edit Mode' : 'Object Mode'}
+            <ChevronDown className="h-3 w-3 text-ink-500" />
+          </button>
+          {mode === 'edit' && (
+            <div className="flex shrink-0 rounded-md border border-ink-700 bg-ink-850 p-0.5">
+              {selectModes.map((m) => (
+                <IconButton key={m.id} title={m.title} active={selectMode === m.id} onClick={() => setSelectMode(m.id)}>
+                  {m.icon}
+                </IconButton>
+              ))}
+            </div>
+          )}
+          <div className="mx-1 h-5 w-px shrink-0 bg-ink-700" />
+          {menuButton('View', viewMenu)}
+          {menuButton('Select', selectMenu)}
+          {menuButton('Add', addMenu)}
+          {mode === 'edit' ? menuButton('Mesh', meshMenu) : menuButton('Object', objectMenu)}
+          {menuButton('File', fileItems)}
+          <div className="min-w-2 flex-1" />
+          <IconButton title="X-ray (Alt+Z)" active={xray} onClick={() => st().setXray(!xray)}>
+            <ScanEye className="h-4 w-4" />
+          </IconButton>
+          <div className="flex shrink-0 rounded-md border border-ink-700 bg-ink-850 p-0.5">
+            {shadings.map((s) => (
+              <button key={s.id} type="button" title={s.title} onClick={() => st().setShading(s.id)} className={cn('rounded px-2 py-0.5 text-[11px] pointer-coarse:py-1.5', shading === s.id ? 'bg-brand-500/25 text-brand-100' : 'text-ink-400 hover:text-white')}>
+                {s.label}
+              </button>
             ))}
           </div>
-        )}
-        <div className="mx-1 h-5 w-px bg-ink-700" />
-        {menuButton('View', viewMenu)}
-        {menuButton('Select', selectMenu)}
-        {menuButton('Add', addMenu)}
-        {mode === 'edit' ? menuButton('Mesh', meshMenu) : menuButton('Object', objectMenu)}
-        {menuButton('File', fileItems)}
-        <div className="flex-1" />
-        <IconButton title="X-ray (Alt+Z)" active={xray} onClick={() => st().setXray(!xray)}>
-          <ScanEye className="h-4 w-4" />
-        </IconButton>
-        <div className="flex rounded-md border border-ink-700 bg-ink-850 p-0.5">
-          {shadings.map((s) => (
-            <button key={s.id} type="button" title={s.title} onClick={() => st().setShading(s.id)} className={cn('rounded px-2 py-0.5 text-[11px]', shading === s.id ? 'bg-brand-500/25 text-brand-100' : 'text-ink-400 hover:text-white')}>
-              {s.label}
-            </button>
-          ))}
+          <IconButton title="Snapping: 0.1 m · 5° · 0.1 (hold Ctrl to toggle while moving)" active={snap} onClick={() => st().setSnap(!snap)}>
+            <Magnet className="h-4 w-4" />
+          </IconButton>
+          <div className="mx-1 h-5 w-px shrink-0 bg-ink-700" />
+          <IconButton title="Undo (Ctrl+Z)" disabled={!canUndo} onClick={() => st().undo()}>
+            <Undo2 className="h-4 w-4" />
+          </IconButton>
+          <IconButton title="Redo (Ctrl+Shift+Z)" disabled={!canRedo} onClick={() => st().redo()}>
+            <Redo2 className="h-4 w-4" />
+          </IconButton>
+          <IconButton title="Keyboard shortcuts" onClick={() => setHelp(true)}>
+            <Keyboard className="h-4 w-4" />
+          </IconButton>
         </div>
-        <IconButton title="Snapping: 0.1 m · 5° · 0.1 (hold Ctrl to toggle while moving)" active={snap} onClick={() => st().setSnap(!snap)}>
-          <Magnet className="h-4 w-4" />
-        </IconButton>
-        <div className="mx-1 h-5 w-px bg-ink-700" />
-        <IconButton title="Undo (Ctrl+Z)" disabled={!canUndo} onClick={() => st().undo()}>
-          <Undo2 className="h-4 w-4" />
-        </IconButton>
-        <IconButton title="Redo (Ctrl+Shift+Z)" disabled={!canRedo} onClick={() => st().redo()}>
-          <Redo2 className="h-4 w-4" />
-        </IconButton>
-        <IconButton title="Keyboard shortcuts" onClick={() => setHelp(true)}>
-          <Keyboard className="h-4 w-4" />
-        </IconButton>
-        <button type="button" onClick={onDone} className="ml-1 rounded-md bg-brand-500 px-3 py-1 text-[12px] font-semibold text-white hover:bg-brand-400" title="Back to the pack (the prop is updated)">
+        {wide && (
+          <IconButton title={sidebar ? 'Hide the properties sidebar (N)' : 'Show the properties sidebar (N)'} active={sidebar} onClick={() => st().setSidebar(!sidebar)}>
+            <PanelRight className="h-4 w-4" />
+          </IconButton>
+        )}
+        <button type="button" onClick={onDone} className="ml-0.5 shrink-0 rounded-md bg-brand-500 px-3 py-1 text-[12px] font-semibold text-white hover:bg-brand-400 pointer-coarse:py-1.5" title="Back to the pack (the prop is updated)">
           Done
         </button>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[1fr_300px]">
-        <div className="relative min-h-[420px]">
+      <div className="flex min-h-0 flex-1">
+        <div className="relative min-h-0 min-w-0 flex-1">
           <ModelerViewport />
-          <div className="absolute top-10 left-2 z-20 flex flex-col gap-0.5 rounded-lg border border-ink-700 bg-ink-900/90 p-1 backdrop-blur">
+          <div className="absolute top-10 left-2 z-20 flex max-h-[calc(100%-3rem)] flex-col gap-0.5 overflow-y-auto rounded-lg border border-ink-700 bg-ink-900/90 p-1 backdrop-blur scrollbar-none">
             {tools.map((t) => (
               <IconButton key={t.id} title={t.title} active={tool === t.id} onClick={() => st().setTool(t.id)}>
                 {t.icon}
               </IconButton>
             ))}
-            <div className="my-0.5 h-px bg-ink-700" />
+            <div className="my-0.5 h-px shrink-0 bg-ink-700" />
             {mode === 'edit' ? (
               <>
                 <IconButton title="Extrude (E)" onClick={() => viewport.current?.startExtrude()}>
@@ -302,17 +333,40 @@ export function ModelerWorkspace({ name, onDone }: { name: string; onDone: () =>
                 </IconButton>
               </>
             ) : (
-              <IconButton title="Add cube (Shift+A for more)" onClick={() => addPrimitive('cube')}>
-                <Box className="h-4 w-4" />
+              <IconButton title="Add object (Shift+A)" onClick={(e) => openViewportMenu(e, 'add')}>
+                <Plus className="h-4 w-4" />
               </IconButton>
             )}
+            <IconButton title="Delete (X)" onClick={(e) => openViewportMenu(e, 'delete')}>
+              <Trash2 className="h-4 w-4" />
+            </IconButton>
+            <IconButton title="More tools (right click / long press)" onClick={(e) => openViewportMenu(e, 'context')}>
+              <MoreHorizontal className="h-4 w-4" />
+            </IconButton>
           </div>
+          {!wide && sheetOpen && (
+            <div className="absolute inset-x-0 bottom-0 z-30 flex max-h-[68%] flex-col rounded-t-2xl border-t border-ink-700 bg-ink-950/97 shadow-[0_-12px_40px_rgba(0,0,0,0.55)] backdrop-blur">
+              <div className="flex shrink-0 items-center gap-2 px-3 pt-2 pb-1.5">
+                <span className="text-[13px] font-semibold text-ink-100">{PANEL_TABS.find((t) => t.id === tab)?.label}</span>
+                <span className="flex-1" />
+                <button type="button" onClick={() => setSheetOpen(false)} className="flex h-8 w-8 items-center justify-center rounded-full bg-ink-800 text-ink-300 hover:text-white" aria-label="Close panel">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="scrollbar-thin min-h-0 flex-1 overflow-auto px-3 pb-4">
+                <PanelContent tab={tab} />
+              </div>
+            </div>
+          )}
         </div>
-        <aside className="min-h-0 overflow-hidden border-t border-ink-800 bg-ink-950 md:border-t-0 md:border-l">
-          <ModelerPanels />
-        </aside>
+        {wide && sidebar && (
+          <aside className="w-[300px] shrink-0 overflow-hidden border-l border-ink-800 bg-ink-950 lg:w-[320px]">
+            <ModelerPanels tab={tab} onTab={setTab} />
+          </aside>
+        )}
       </div>
-      <StatusBar />
+      {!wide && <PanelTabBar tabs={PANEL_TABS.map((t) => t.id)} current={sheetOpen ? tab : null} onTab={toggleTab} className="shrink-0 border-t border-ink-800 bg-ink-900 px-1 py-1" />}
+      <StatusBar compact={!wide} />
 
       <input
         ref={openRef}

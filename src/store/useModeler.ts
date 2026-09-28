@@ -31,6 +31,8 @@ interface ModelerState extends ModelerSnapshot {
   shading: Shading
   snap: boolean
   showReference: boolean
+  /** Properties sidebar shown (N), on screens wide enough for it. */
+  sidebar: boolean
   /** Status bar text of the running operation. */
   status: string | null
 
@@ -49,6 +51,7 @@ interface ModelerState extends ModelerSnapshot {
   setShading: (s: Shading) => void
   setSnap: (on: boolean) => void
   setShowReference: (on: boolean) => void
+  setSidebar: (on: boolean) => void
   setStatus: (s: string | null) => void
 }
 
@@ -79,6 +82,7 @@ export const useModeler = create<ModelerState>((set, get) => ({
   shading: 'material',
   snap: false,
   showReference: true,
+  sidebar: true,
   status: null,
 
   load: (doc) => set((s) => ({ ...initial(doc), past: [], future: [], txn: null, revision: s.revision + 1, status: null })),
@@ -116,6 +120,7 @@ export const useModeler = create<ModelerState>((set, get) => ({
   setShading: (shading) => set({ shading }),
   setSnap: (snap) => set({ snap }),
   setShowReference: (showReference) => set({ showReference }),
+  setSidebar: (sidebar) => set({ sidebar }),
   setStatus: (status) => set({ status }),
 }))
 

@@ -1,6 +1,6 @@
 import * as THREE from 'three'
-import { boxUV, faceArea, faceNormal, triangulateFace } from '@/lib/modeler/mesh'
-import { applyModifiers } from '@/lib/modeler/modifiers'
+import { boxUV, cloneMesh, faceArea, faceNormal, flipFaces, triangulateFace } from '@/lib/modeler/mesh'
+import { applyModifiers, type ModifierContext } from '@/lib/modeler/modifiers'
 import type { EditMesh, ModelDoc, ModelMaterial, ModelObject, Vec2, Vec3 } from '@/lib/modeler/types'
 
 /*
@@ -11,9 +11,51 @@ import type { EditMesh, ModelDoc, ModelMaterial, ModelObject, Vec2, Vec3 } from 
 
 export const Z_UP_ROTATION = new THREE.Euler(-Math.PI / 2, 0, 0)
 
+/** `mesh` moved by `m`, with the winding fixed for mirroring matrices. */
+function transformedMesh(mesh: EditMesh, m: THREE.Matrix4): EditMesh {
+  const v = new THREE.Vector3()
+  const out = cloneMesh(mesh)
+  for (const p of out.verts) {
+    v.set(p[0], p[1], p[2]).applyMatrix4(m)
+    p[0] = v.x
+    p[1] = v.y
+    p[2] = v.z
+  }
+  return m.determinant() < 0 ? flipFaces(out, out.faces.map((_, i) => i)) : out
+}
+
+/**
+ * Lets modifiers of `obj` read other objects of `doc` (boolean cutters), evaluated and
+ * moved into `obj`'s local space. Reference cycles resolve to nothing.
+ */
+export function modifierContext(obj: ModelObject, doc: ModelDoc, visiting: Set<string> = new Set()): ModifierContext {
+  return {
+    resolve: (id) => {
+      if (id === obj.id || visiting.has(id)) return null
+      const target = doc.objects.find((o) => o.id === id)
+      if (!target) return null
+      const mesh = evaluateObject(target, doc, new Set([...visiting, obj.id]))
+      const m = objectMatrix(obj).invert().multiply(objectMatrix(target))
+      return transformedMesh(mesh, m)
+    },
+  }
+}
+
 /** The mesh an object shows: its edit mesh with the modifier stack applied. */
-export function evaluateObject(obj: ModelObject): EditMesh {
-  return obj.modifiers.some((m) => m.enabled) ? applyModifiers(obj.mesh, obj.modifiers) : obj.mesh
+export function evaluateObject(obj: ModelObject, doc?: ModelDoc, visiting?: Set<string>): EditMesh {
+  if (!obj.modifiers.some((m) => m.enabled)) return obj.mesh
+  return applyModifiers(obj.mesh, obj.modifiers, doc ? modifierContext(obj, doc, visiting) : undefined)
+}
+
+/** Objects that an object's modifiers read (so views can rebuild when they change). */
+export function modifierTargets(obj: ModelObject, doc: ModelDoc): ModelObject[] {
+  const out: ModelObject[] = []
+  for (const m of obj.modifiers) {
+    if (m.kind !== 'boolean' || !m.enabled || !m.target) continue
+    const t = doc.objects.find((o) => o.id === m.target)
+    if (t) out.push(t)
+  }
+  return out
 }
 
 /** Object -> document space matrix. */
@@ -131,7 +173,8 @@ export function buildGeometry(mesh: EditMesh, opts: GeometryOptions): THREE.Buff
 }
 
 /** Geometry of an object as shown (modifiers applied), in its local space. */
-export function objectGeometry(obj: ModelObject, materials: ModelMaterial[], mesh = evaluateObject(obj)) {
+export function objectGeometry(obj: ModelObject, materials: ModelMaterial[], doc?: ModelDoc) {
+  const mesh = evaluateObject(obj, doc)
   const byId = new Map(materials.map((m) => [m.id, m]))
   return buildGeometry(mesh, {
     autoSmooth: obj.autoSmooth,
@@ -257,7 +300,7 @@ export function docToThree(doc: ModelDoc, library: MaterialLibrary): THREE.Group
   for (const obj of doc.objects) {
     // hidden objects are hidden while modelling only; they are still part of the prop
     if (obj.role !== 'visual' || !obj.mesh.faces.length) continue
-    const geo = objectGeometry(obj, doc.materials)
+    const geo = objectGeometry(obj, doc.materials, doc)
     if (!geo.attributes.position.count) {
       geo.dispose()
       continue
@@ -283,7 +326,7 @@ export function collisionGeometries(doc: ModelDoc): THREE.BufferGeometry[] {
   const toYUp = new THREE.Matrix4().makeRotationFromEuler(Z_UP_ROTATION)
   for (const obj of doc.objects) {
     if (obj.role !== 'collision' || !obj.mesh.faces.length) continue
-    const geo = buildGeometry(evaluateObject(obj), { autoSmooth: 0 })
+    const geo = buildGeometry(evaluateObject(obj, doc), { autoSmooth: 0 })
     geo.clearGroups()
     geo.deleteAttribute('uv')
     geo.applyMatrix4(new THREE.Matrix4().multiplyMatrices(toYUp, objectMatrix(obj)))
