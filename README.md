@@ -37,6 +37,22 @@ A visual minimap editor for FiveM (GTA V) servers. Design custom minimaps in the
 - **Plans** – Free (1 export / day) and Supporter (unlimited); limits enforced in the export dialog
 - **Responsive** – desktop side panels, tablet toggles, mobile horizontal toolbar with bottom sheets
 
+## Prop Creator (FiveM props)
+
+`/tools/props` builds addon props and exports them as a ready-to-run FiveM resource.
+
+- **Modeler (Blender-style)** – object / edit mode (`Tab`), vertex / edge / face selection (`1 2 3`), click, box and loop
+  selection, `G R S` with axis constraints, typed values and snapping, extrude, inset, loop cut, subdivide, merge, fill,
+  dissolve, separate / join, normals tools, primitives (`Shift+A`), mirror / array / subdivision / solidify modifiers,
+  material slots with colour, textures (box or mesh UVs), metallic, roughness, glow and opacity, undo / redo, a 3D cursor
+  and a navigation gizmo. Objects can be marked **Collision** to draw the collision by hand. Models save as
+  `.l7model.json`; imported GLB / OBJ / FBX / STL props can be converted into editable meshes.
+- **Native export** – no Blender, Sollumz or CodeWalker step: every prop becomes a `stream/<prop>.ydr` (Z-up geometry,
+  shaders, embedded DXT textures, optional LODs and the embedded collision – box, sphere, convex hull or BVH mesh with a
+  chosen surface material) and the pack gets a `stream/<pack>.ytyp` with the archetypes (bounds, draw distance,
+  static / dynamic flag), `fxmanifest.lua` (`DLC_ITYP_REQUEST`), spawn / delete commands, and CodeWalker XML + DDS,
+  GLB and model sources for further editing. The writers in `src/lib/gta/` produce the same bytes as CodeWalker.
+
 ## Keyboard shortcuts
 
 | Keys | Action |
@@ -96,9 +112,12 @@ src/
 │  ├─ editor/      MapCanvas (Konva), Toolbar, LayersPanel, PropertiesPanel, TopBar, StatusBar, Export/Import dialogs
 │  ├─ landing/     Hero backdrop
 │  ├─ layout/      Navbar
+│  ├─ modeler/     Prop Creator modeler: viewport, panels, menus
 │  └─ ui/          Button, Modal, Toast, Logo
 ├─ hooks/          useShortcuts
 ├─ lib/
+│  ├─ gta/         Native GTA V writers: RSC7 resources, .ydr drawables, bounds (.ybn data), .ytyp, DXT
+│  ├─ modeler/     Modeler document, mesh editing operations, primitives, modifiers, three.js conversion
 │  ├─ data/        DataService interface + Supabase and IndexedDB implementations
 │  ├─ basemaps.ts  Procedural base-map presets (rendered in-browser, no external assets)
 │  ├─ exporter.ts  FiveM resource ZIP generator

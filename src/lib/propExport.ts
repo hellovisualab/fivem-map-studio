@@ -1,25 +1,17 @@
 import * as THREE from 'three'
 import JSZip from 'jszip'
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js'
-import { OBJExporter } from 'three/examples/jsm/exporters/OBJExporter.js'
-import {
-  applyPropWorldTransform,
-  bakeWorldMeshes,
-  extractMaterialTextures,
-  gtaBounds,
-  makeCollisionGeometry,
-  meshCollisionGeometry,
-  simplifyObject,
-} from '@/lib/propGeometry'
-import type { PropAsset } from '@/lib/propTypes'
+import { compileProp, type CompiledProp, type PropCompileInput } from '@/lib/gta/prop'
+import { ddsFile } from '@/lib/gta/cwxml'
+import { buildYtyp, ytypXml } from '@/lib/gta/ytyp'
+import { collisionGeometries, modelMaterials } from '@/lib/modeler/build'
+import { serializeDoc, MODEL_FILE_EXT } from '@/lib/modeler/doc'
+import { applyPropWorldTransform, bakeWorldMeshes, makeCollisionGeometry, meshCollisionGeometry, simplifyGeometry } from '@/lib/propGeometry'
+import { SURFACES, SURFACE_CONCRETE, SURFACE_PLASTIC, type PropAsset } from '@/lib/propTypes'
 import { fixModelName } from '@/lib/propLoad'
 import { slugify } from '@/lib/utils'
 
 export type { PropAsset } from '@/lib/propTypes'
-
-function num(n: number, d = 4) {
-  return Number.isFinite(n) ? n.toFixed(d) : '0'
-}
 
 function exportGlb(object: THREE.Object3D): Promise<ArrayBuffer> {
   return new Promise((resolve, reject) => {
@@ -35,18 +27,6 @@ function exportGlb(object: THREE.Object3D): Promise<ArrayBuffer> {
   })
 }
 
-function bakedRoot(prop: PropAsset) {
-  const wrapped = applyPropWorldTransform(prop.object, prop.position, prop.rotation, prop.scale)
-  return bakeWorldMeshes(wrapped)
-}
-
-function worldBox(prop: PropAsset) {
-  const wrapped = applyPropWorldTransform(prop.object, prop.position, prop.rotation, prop.scale)
-  wrapped.updateMatrixWorld(true)
-  // precise: bounds of the actual vertices, not of rotated bounding boxes
-  return new THREE.Box3().setFromObject(wrapped, true)
-}
-
 function disposeGeometry(root: THREE.Object3D) {
   root.traverse((c) => (c as THREE.Mesh).geometry?.dispose())
 }
@@ -56,57 +36,102 @@ function luaStr(s: string) {
   return `'${s.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r?\n/g, '\\n')}'`
 }
 
-function xmlText(s: string) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
-
-// CodeWalker archetype flags: 32 = Static, 131072 = Dynamic.
-const FLAG_STATIC = 32
-const FLAG_DYNAMIC = 131072
-
 /** Valid, unique model names for the whole pack (the editor already keeps them so). */
 export function resolvePropNames(props: PropAsset[]) {
   const used = new Set<string>()
   return props.map((p) => ({ ...p, name: fixModelName(p.name, p.label, used) }))
 }
 
-function ytypXml(resource: string, props: PropAsset[], textured: Set<string>) {
-  const items = props
-    .map((prop) => {
-      const box = worldBox(prop)
-      const { bbMin, bbMax, bsCentre, bsRadius } = gtaBounds(box.min, box.max)
-      const physics = prop.collision === 'none' ? '' : prop.name
-      return `    <Item type="CBaseArchetypeDef">
-      <lodDist value="${num(prop.lodDist, 2)}" />
-      <flags value="${prop.dynamic ? FLAG_DYNAMIC : FLAG_STATIC}" />
-      <specialAttribute value="0" />
-      <bbMin x="${num(bbMin.x)}" y="${num(bbMin.y)}" z="${num(bbMin.z)}" />
-      <bbMax x="${num(bbMax.x)}" y="${num(bbMax.y)}" z="${num(bbMax.z)}" />
-      <bsCentre x="${num(bsCentre.x)}" y="${num(bsCentre.y)}" z="${num(bsCentre.z)}" />
-      <bsRadius value="${num(bsRadius)}" />
-      <hdTextureDist value="${num(prop.hdTextureDist, 2)}" />
-      <name>${prop.name}</name>
-      <textureDictionary>${textured.has(prop.name) ? prop.name : ''}</textureDictionary>
-      <clipDictionary />
-      <drawableDictionary />
-      <physicsDictionary>${physics}</physicsDictionary>
-      <assetType>ASSET_TYPE_DRAWABLE</assetType>
-      <assetName>${prop.name}</assetName>
-      <extensions />
-    </Item>`
+/** World matrix of the prop transform set in the pack. */
+function packMatrix(prop: PropAsset) {
+  return applyPropWorldTransform(new THREE.Group(), prop.position, prop.rotation, prop.scale).matrixWorld.clone()
+}
+
+/** Geometry baked to the root's space; mirrored matrices keep their triangles facing out. */
+function bakedGeometry(mesh: THREE.Mesh): THREE.BufferGeometry {
+  const geo = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone()
+  geo.applyMatrix4(mesh.matrixWorld)
+  if (mesh.matrixWorld.determinant() < 0) {
+    for (const name of Object.keys(geo.attributes)) {
+      const a = geo.attributes[name]
+      for (let i = 0; i + 2 < a.count; i += 3) {
+        for (let k = 0; k < a.itemSize; k++) {
+          const t = a.getComponent(i + 1, k)
+          a.setComponent(i + 1, k, a.getComponent(i + 2, k))
+          a.setComponent(i + 2, k, t)
+        }
+      }
+    }
+  }
+  return geo
+}
+
+/** Simplified copy for a LOD level. Materials are shared so LODs reuse the same shaders. */
+function lodObject(root: THREE.Object3D, ratio: number) {
+  root.updateMatrixWorld(true)
+  const out = new THREE.Group()
+  root.traverse((c) => {
+    const mesh = c as THREE.Mesh
+    if (!mesh.isMesh || !mesh.geometry?.attributes.position) return
+    const baked = bakedGeometry(mesh)
+    const simple = simplifyGeometry(baked, ratio)
+    if (simple !== baked) baked.dispose()
+    out.add(new THREE.Mesh(simple, mesh.material))
+  })
+  return out
+}
+
+/** Collision input for the compiler, in editor space with the pack transform applied. */
+function collisionInput(prop: PropAsset): PropCompileInput['collision'] {
+  const matrix = packMatrix(prop)
+  if (prop.collision === 'custom' && prop.model) {
+    const parts = collisionGeometries(prop.model).map((g) => g.applyMatrix4(matrix))
+    return { kind: 'custom', parts }
+  }
+  if (prop.collision === 'none' || prop.collision === 'custom') return { kind: 'none' }
+  const geo =
+    prop.collision === 'mesh'
+      ? meshCollisionGeometry(prop.object, prop.collisionRatio ?? 0.25)
+      : makeCollisionGeometry(prop.collision, new THREE.Vector3(...prop.localMin), new THREE.Vector3(...prop.localMax), prop.object)
+  return { kind: prop.collision, mesh: geo ? geo.applyMatrix4(matrix) : null }
+}
+
+export function surfaceOf(prop: PropAsset) {
+  return prop.surface ?? (prop.dynamic ? SURFACE_PLASTIC : SURFACE_CONCRETE)
+}
+
+export interface PropBuildResult {
+  prop: PropAsset
+  compiled: CompiledProp
+  /** Visual meshes in editor space with the pack transform (for the GLB copy). */
+  visual: THREE.Object3D
+}
+
+/** Compiles one prop into its native files. */
+export async function buildProp(prop: PropAsset): Promise<PropBuildResult> {
+  if (prop.model) await modelMaterials.ready(prop.model.materials)
+  const visual = applyPropWorldTransform(prop.object, prop.position, prop.rotation, prop.scale)
+  const lods = prop.generateLods && prop.triangleCount > 80 ? { med: lodObject(visual, 0.45), low: lodObject(visual, 0.18) } : undefined
+  const collision = collisionInput(prop)
+  try {
+    const compiled = compileProp({
+      name: prop.name,
+      visual,
+      lods,
+      collision,
+      collisionMaterial: surfaceOf(prop),
+      dynamic: prop.dynamic,
+      lodDist: prop.lodDist,
+      hdTextureDist: prop.hdTextureDist,
+      textureMaxSize: prop.textureSize ?? 1024,
     })
-    .join('\n')
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<CMapTypes>
-  <extensions />
-  <archetypes>
-${items}
-  </archetypes>
-  <name>${xmlText(resource)}</name>
-  <dependencies />
-  <compositeEntityTypes />
-</CMapTypes>
-`
+    return { prop, compiled, visual }
+  } finally {
+    collision.mesh?.dispose()
+    for (const g of collision.parts ?? []) g.dispose()
+    if (lods?.med) disposeGeometry(lods.med)
+    if (lods?.low) disposeGeometry(lods.low)
+  }
 }
 
 function fxmanifest(resource: string) {
@@ -209,7 +234,7 @@ RegisterCommand(Config.SpawnCommand, function(_, args)
   end
   local hash = GetHashKey(entry.model)
   if not loadModel(hash) then
-    notify(('Model %s is not streamed yet: convert it and put the .ydr / .ytd / .ybn and ${resource}.ytyp in stream/ (see README.md).'):format(entry.model))
+    notify(('Model %s did not load. Check that ${resource} is started (ensure ${resource}) and that stream/ has %s.ydr and ${resource}.ytyp.'):format(entry.model, entry.model))
     return
   end
   local ped = PlayerPedId()
@@ -268,140 +293,118 @@ function serverLua(resource: string, count: number) {
 `
 }
 
-function readme(resource: string, props: PropAsset[], files: Map<string, string[]>) {
-  const list = props
-    .map((p) => `- \`${p.name}\` — ${p.label} · ${p.triangleCount.toLocaleString('en')} tris · ${p.collision} collision · ${p.dynamic ? 'dynamic' : 'static'} · files: ${(files.get(p.name) ?? []).join(', ')}`)
+function surfaceName(id: number) {
+  return SURFACES.find((s) => s.id === id)?.label ?? `material ${id}`
+}
+
+function readme(resource: string, built: PropBuildResult[]) {
+  const list = built
+    .map(({ prop: p, compiled: c }) => {
+      const s = c.stats
+      return `- \`${p.name}\` — ${p.label} · ${s.triangles.toLocaleString('en')} tris · ${c.textures.length} texture${c.textures.length === 1 ? '' : 's'} · collision: ${s.collisionType}${s.collisionTriangles ? ` (${s.collisionTriangles} tris)` : ''}, ${surfaceName(surfaceOf(p)).toLowerCase()} · ${p.dynamic ? 'dynamic' : 'static'} · draw distance ${p.lodDist} m`
+    })
     .join('\n')
   return `# ${resource}
 
-Exported from **LABSEVE7 Tools · Prop Creator**.
-
-Browsers cannot write GTA's native \`.ydr\` / \`.ytd\` / \`.ybn\` / \`.ytyp\` binaries, so this pack contains everything
-already baked (transforms, materials, collision, LODs, bounds) for a one-step conversion with
-**Blender + Sollumz** or **CodeWalker**.
-
-## Convert (Blender + Sollumz)
-For each prop:
-1. *File → Import → glTF 2.0* \`source/<prop>.glb\` (metres, origin on the ground — do not move it).
-2. Select the mesh and use *Sollumz → Convert to Drawable*. If \`<prop>_lod1.glb\` / \`<prop>_lod2.glb\` exist,
-   import them and assign them as the **Medium** / **Low** LOD of the same drawable.
-3. Collision: import \`source/<prop>_col.obj\` (*Forward -Z, Up Y*), convert it to a *Bound Composite* with a
-   *Bound Geometry BVH* child and parent it to the drawable (skip for props with \`none\` collision).
-4. Textures are embedded in the GLB; \`source/textures/\` has the same images as power-of-two PNGs
-   (\`*_n.png\` = normal map) if you build the \`.ytd\` yourself.
-5. Export the drawable (\`<prop>.ydr\`, embedded collision and textures).
-
-Then import \`codewalker/${resource}.ytyp.xml\` (Sollumz *Import YTYP* or CodeWalker *Import XML*) and export it as
-\`${resource}.ytyp\`. Its archetypes already carry the bounds, draw distance, texture / physics dictionary names
-and the Static / Dynamic flag of each prop.
+Exported from **LABSEVE7 Tools · Prop Creator**. Everything in \`stream/\` is a native GTA V file, ready for FiveM —
+no Blender, Sollumz or CodeWalker step needed.
 
 ## Install
-1. Put every \`.ydr\` (and \`.ytd\` / \`.ybn\` if you made separate ones) plus \`${resource}.ytyp\` in \`stream/\`.
-2. Copy this folder to your server's \`resources/\` and add \`ensure ${resource}\` to \`server.cfg\`.
+1. Copy this folder to your server's \`resources/\` folder.
+2. Add \`ensure ${resource}\` to \`server.cfg\` (or run \`refresh\` + \`ensure ${resource}\` in the server console).
 3. In game: \`/spawnprop [model]\`, \`/listprops\`, \`/delprop\` (commands can be renamed in \`config.lua\`).
 
-## This pack
-${list}
+Use the model names below in your own scripts (\`CreateObject(\`GetHashKey('model')\`...)\`), in map editors, or place
+them in a \`.ymap\`.
 
-## Folders
-- \`source/\` — baked GLB per prop (Y-up glTF, metres), LOD meshes, collision OBJ, the original upload and \`textures/\`
-- \`codewalker/${resource}.ytyp.xml\` — archetype definitions (CodeWalker / Sollumz XML)
-- \`stream/\` — put the converted game files here
-- \`config.lua\` / \`client.lua\` — spawn, list and delete commands
-- \`props.json\` — the editor settings of each prop
+## What is inside
+- \`stream/<prop>.ydr\` — the drawable: meshes (Z-up, metres), shaders, **embedded DXT textures**, LODs and the
+  **embedded collision** (bound composite: box, sphere, convex hull or BVH mesh).
+- \`stream/${resource}.ytyp\` — the archetypes: bounds, draw distance, Static / Dynamic flag of every prop.
+  \`fxmanifest.lua\` loads it with \`data_file 'DLC_ITYP_REQUEST'\`.
+- \`config.lua\` / \`client.lua\` / \`server.lua\` — spawn, list and delete commands.
+- \`source/\` — editable copies:
+  - \`<prop>.ydr.xml\` + \`<prop>/*.dds\` — CodeWalker / Sollumz XML of each drawable (open or import to tweak it and
+    re-export).
+  - \`${resource}.ytyp.xml\` — the archetypes as XML.
+  - \`<prop>.glb\` — the model for Blender or any 3D tool.
+  - \`*${MODEL_FILE_EXT}\` — modeler scenes: open them again in Prop Creator → Modeler → File → Open model.
+- \`props.json\` — the editor settings of each prop.
+
+## Props
+${list}
 `
 }
 
-export async function exportPropResource(input: PropAsset[], resourceName: string) {
+export async function exportPropResource(input: PropAsset[], resourceName: string, onProgress?: (text: string) => void) {
   const props = resolvePropNames(input)
   const zip = new JSZip()
   const rootName = slugify(resourceName.trim() || 'prop_pack')
   const folder = zip.folder(rootName)!
-  const source = folder.folder('source')!
-  const textures = source.folder('textures')!
   const stream = folder.folder('stream')!
-  const codewalker = folder.folder('codewalker')!
-  const files = new Map<string, string[]>()
-  // Like Sollumz: only props with textures name a texture dictionary.
-  const textured = new Set<string>()
+  const source = folder.folder('source')!
+  const built: PropBuildResult[] = []
+  const warnings: string[] = []
 
-  for (const prop of props) {
-    const written: string[] = []
-    const add = (dir: JSZip, path: string, data: string | ArrayBuffer | Blob) => {
-      dir.file(path, data)
-      written.push(path)
+  for (const [i, prop] of props.entries()) {
+    onProgress?.(`Compiling ${prop.name} (${i + 1}/${props.length})`)
+    // let the UI paint between props
+    await new Promise((r) => setTimeout(r, 0))
+    const result = await buildProp(prop)
+    built.push(result)
+    const c = result.compiled
+    stream.file(`${prop.name}.ydr`, c.ydr)
+    source.file(`${prop.name}.ydr.xml`, c.ydrXml)
+    const texFolder = source.folder(prop.name)!
+    for (const t of c.textures) texFolder.file(`${t.name}.dds`, ddsFile(t))
+    for (const w of c.warnings) warnings.push(`${prop.name}: ${w}`)
+
+    try {
+      const baked = bakeWorldMeshes(result.visual)
+      source.file(`${prop.name}.glb`, await exportGlb(baked))
+      disposeGeometry(baked)
+    } catch {
+      warnings.push(`${prop.name}: the GLB copy could not be written.`)
     }
-    const baked = bakedRoot(prop)
-    add(source, `${prop.name}.glb`, await exportGlb(baked))
-    if (prop.file.size > 64) add(source, `${prop.name}.original${extOf(prop.file)}`, prop.file)
-
-    if (prop.generateLods && prop.triangleCount > 80) {
-      for (const [suffix, ratio] of [
-        ['lod1', 0.45],
-        ['lod2', 0.18],
-      ] as const) {
-        try {
-          const lod = simplifyObject(baked, ratio)
-          add(source, `${prop.name}_${suffix}.glb`, await exportGlb(lod))
-          disposeGeometry(lod)
-        } catch {
-          /* keep the high model only if simplification fails */
-        }
-      }
-    }
-
-    const colGeo =
-      prop.collision === 'mesh'
-        ? meshCollisionGeometry(prop.object, prop.collisionRatio ?? 0.25)
-        : makeCollisionGeometry(prop.collision, new THREE.Vector3(...prop.localMin), new THREE.Vector3(...prop.localMax), prop.object)
-    if (colGeo) {
-      const col = applyPropWorldTransform(new THREE.Mesh(colGeo), prop.position, prop.rotation, prop.scale)
-      const bakedCol = bakeWorldMeshes(col)
-      add(source, `${prop.name}_col.obj`, new OBJExporter().parse(bakedCol))
-      disposeGeometry(bakedCol)
-      colGeo.dispose()
-    }
-
-    const maps = await extractMaterialTextures(baked)
-    for (const tex of maps) add(textures, `${prop.name}_${tex.name}`, tex.blob)
-    if (maps.length) textured.add(prop.name)
-    disposeGeometry(baked)
-    files.set(prop.name, written)
+    if (prop.model) source.file(`${prop.name}${MODEL_FILE_EXT}`, serializeDoc(prop.model, prop.name))
+    else if (prop.file.size > 64) source.file(`${prop.name}.original${extOf(prop.file)}`, prop.file)
   }
 
-  codewalker.file(`${rootName}.ytyp.xml`, ytypXml(rootName, props, textured))
-  stream.file(
-    'README.txt',
-    `Put ${rootName}.ytyp, plus each prop's .ydr (and .ytd / .ybn if separate) in this folder after converting with Sollumz or CodeWalker. See ../README.md.\n`,
-  )
+  const archetypes = built.map((b) => b.compiled.archetype)
+  stream.file(`${rootName}.ytyp`, buildYtyp(rootName, archetypes))
+  source.file(`${rootName}.ytyp.xml`, ytypXml(rootName, archetypes))
 
   folder.file('fxmanifest.lua', fxmanifest(rootName))
   folder.file('config.lua', configLua(props))
   folder.file('client.lua', clientLua(rootName))
   folder.file('server.lua', serverLua(rootName, props.length))
-  folder.file('README.md', readme(rootName, props, files))
+  folder.file('README.md', readme(rootName, built))
   folder.file(
     'props.json',
     JSON.stringify(
       {
         resource: rootName,
-        props: props.map((p) => ({
+        props: built.map(({ prop: p, compiled: c }) => ({
           name: p.name,
           label: p.label,
-          file: p.file.name,
+          file: p.model ? `${p.name}${MODEL_FILE_EXT}` : p.file.name,
           position: p.position,
           rotation: p.rotation,
           scale: p.scale,
           collision: p.collision,
+          collisionType: c.stats.collisionType,
           collisionRatio: p.collisionRatio,
+          surface: surfaceOf(p),
           lodDist: p.lodDist,
           hdTextureDist: p.hdTextureDist,
           generateLods: p.generateLods,
           dynamic: p.dynamic,
-          vertexCount: p.vertexCount,
-          triangleCount: p.triangleCount,
-          size: p.size,
-          files: files.get(p.name) ?? [],
+          textureSize: p.textureSize ?? 1024,
+          vertices: c.stats.vertices,
+          triangles: c.stats.triangles,
+          textures: c.textures.map((t) => `${t.name} ${t.width}x${t.height} ${t.format}`),
+          bbMin: c.archetype.bbMin,
+          bbMax: c.archetype.bbMax,
         })),
       },
       null,
@@ -409,7 +412,13 @@ export async function exportPropResource(input: PropAsset[], resourceName: strin
     ),
   )
 
-  return { blob: await zip.generateAsync({ type: 'blob' }), fileName: `${rootName}.zip`, renamed: props.filter((p, i) => p.name !== input[i].name).length }
+  onProgress?.('Zipping')
+  return {
+    blob: await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } }),
+    fileName: `${rootName}.zip`,
+    renamed: props.filter((p, i) => p.name !== input[i].name).length,
+    warnings,
+  }
 }
 
 function extOf(file: File) {

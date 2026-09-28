@@ -32,7 +32,7 @@ import type { Vec3, Vec4 } from '@/lib/gta/resource'
  * collision (primitives, convex hulls or a BVH mesh).
  */
 
-export type PropCollisionKind = 'none' | 'mesh' | 'box' | 'sphere' | 'capsule' | 'convex'
+export type PropCollisionKind = 'none' | 'mesh' | 'box' | 'sphere' | 'capsule' | 'convex' | 'custom'
 
 export interface PropCompileInput {
   /** GTA model name (archetype, .ydr file). */
@@ -41,8 +41,11 @@ export interface PropCompileInput {
   visual: THREE.Object3D
   /** LOD meshes (same space), optional. */
   lods?: { med?: THREE.Object3D; low?: THREE.Object3D }
-  /** Collision triangles in editor space (transform applied), or a primitive. */
-  collision: { kind: PropCollisionKind; mesh?: THREE.BufferGeometry | null }
+  /**
+   * Collision triangles in editor space (transform applied), or a primitive. `custom` uses
+   * `parts`: one child per part (convex hulls for dynamic props, one BVH for static ones).
+   */
+  collision: { kind: PropCollisionKind; mesh?: THREE.BufferGeometry | null; parts?: THREE.BufferGeometry[] }
   collisionMaterial: number
   dynamic: boolean
   lodDist: number
@@ -638,90 +641,147 @@ function limitVertices(mesh: IndexedMesh): IndexedMesh {
   return { vertices, triangles }
 }
 
-/** Collision child bound for a prop, in GTA space. */
-function collisionBound(input: PropCompileInput, warnings: string[]): { bound: BoundBlock; triangles: number; type: string } | null {
-  const { kind, mesh } = input.collision
-  if (kind === 'none' || !mesh) return null
+/** True when the points fill their bounding box (an axis-aligned box shape). */
+function isAxisAlignedBox(mesh: IndexedMesh) {
+  const [min, max] = bboxOf(mesh.vertices)
+  const boxVolume = (max[0] - min[0]) * (max[1] - min[1]) * (max[2] - min[2])
+  if (!(boxVolume > 0)) return false
+  const hullVolume = massProperties(hullOf(mesh.vertices)).volume
+  return Math.abs(hullVolume - boxVolume) / boxVolume < 0.02
+}
+
+function boxBound(mesh: IndexedMesh, material: BoundMaterial): BoundBlock {
+  const [min, max] = bboxOf(mesh.vertices)
+  const center: Vec3 = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2]
+  const [x, y, z] = [max[0] - min[0], max[1] - min[1], max[2] - min[2]].map((s) => Math.max(s, 0.01))
+  return new BoundBoxBlock({
+    boxMin: min,
+    boxMax: max,
+    boxCenter: center,
+    sphereCenter: center,
+    sphereRadius: 0.5 * Math.hypot(x, y, z),
+    margin: Math.min(0.04, Math.min(x, y, z) / 8),
+    volume: x * y * z,
+    inertia: [(y * y + z * z) / 12, (z * z + x * x) / 12, (x * x + y * y) / 12],
+    material,
+  })
+}
+
+/** Convex hull as a BVH (static) or a convex BoundGeometry (dynamic). */
+function hullBound(points: Vec3[], dynamic: boolean, material: BoundMaterial): { bound: BoundBlock; triangles: number } {
+  const hull = hullOf(points)
+  const c = geometryCommon(hull, !dynamic, material)
+  const def = { ...c, vertices: hull.vertices, triangles: hull.triangles.map((v) => ({ v, material })) }
+  return { bound: dynamic ? new BoundGeometryBlock(def) : new BoundBvhBlock(def), triangles: hull.triangles.length }
+}
+
+function meshBound(mesh: IndexedMesh, material: BoundMaterial, warnings: string[]): { bound: BoundBlock; triangles: number } {
+  const m = limitVertices(mesh)
+  if (m !== mesh) warnings.push('Collision mesh was too dense and got trimmed; lower the collision detail.')
+  const c = geometryCommon(m, true, material)
+  return { bound: new BoundBvhBlock({ ...c, vertices: m.vertices, triangles: m.triangles.map((v) => ({ v, material })) }), triangles: m.triangles.length }
+}
+
+function mergeMeshes(list: IndexedMesh[]): IndexedMesh {
+  const vertices: Vec3[] = []
+  const triangles: [number, number, number][] = []
+  for (const m of list) {
+    const off = vertices.length
+    vertices.push(...m.vertices)
+    for (const t of m.triangles) triangles.push([t[0] + off, t[1] + off, t[2] + off])
+  }
+  return { vertices, triangles }
+}
+
+/** Collision children of a prop, in GTA space. */
+function collisionBounds(input: PropCompileInput, warnings: string[]): { children: BoundBlock[]; triangles: number; type: string } | null {
+  const { kind, mesh, parts } = input.collision
   const material: BoundMaterial = { type: input.collisionMaterial }
+  if (kind === 'custom') {
+    const meshes = (parts ?? []).map(indexedGtaMesh).filter((m) => m.vertices.length >= 4 && m.triangles.length)
+    if (!meshes.length) return null
+    if (input.dynamic) {
+      // one convex child per collision object; boxes stay true boxes
+      let triangles = 0
+      const children = meshes.map((m) => {
+        if (isAxisAlignedBox(m)) {
+          triangles += 12
+          return boxBound(m, material)
+        }
+        const h = hullBound(m.vertices, true, material)
+        triangles += h.triangles
+        return h.bound
+      })
+      return { children, triangles, type: `Composite (${children.length} convex part${children.length === 1 ? '' : 's'})` }
+    }
+    if (meshes.length === 1 && isAxisAlignedBox(meshes[0])) return { children: [boxBound(meshes[0], material)], triangles: 12, type: 'Box' }
+    const b = meshBound(mergeMeshes(meshes), material, warnings)
+    return { children: [b.bound], triangles: b.triangles, type: 'BVH (modeled)' }
+  }
+  if (kind === 'none' || !mesh) return null
   const src = indexedGtaMesh(mesh)
   if (!src.vertices.length) return null
   const [min, max] = bboxOf(src.vertices)
   const size: Vec3 = [max[0] - min[0], max[1] - min[1], max[2] - min[2]]
   const center: Vec3 = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2]
 
-  if (kind === 'box') {
-    // An axis-aligned box stays a true box; a rotated one becomes its convex hull.
-    const hullVolume = massProperties(hullOf(src.vertices)).volume
-    const boxVolume = size[0] * size[1] * size[2]
-    if (boxVolume > 0 && Math.abs(hullVolume - boxVolume) / boxVolume < 0.02) {
-      const [x, y, z] = size.map((s) => Math.max(s, 0.01))
-      return {
-        bound: new BoundBoxBlock({
-          boxMin: min,
-          boxMax: max,
-          boxCenter: center,
-          sphereCenter: center,
-          sphereRadius: 0.5 * Math.hypot(x, y, z),
-          margin: Math.min(0.04, Math.min(x, y, z) / 8),
-          volume: x * y * z,
-          inertia: [(y * y + z * z) / 12, (z * z + x * x) / 12, (x * x + y * y) / 12],
-          material,
-        }),
-        triangles: 12,
-        type: 'Box',
-      }
-    }
-  }
+  // An axis-aligned box stays a true box; a rotated one becomes its convex hull.
+  if (kind === 'box' && isAxisAlignedBox(src)) return { children: [boxBound(src, material)], triangles: 12, type: 'Box' }
   if (kind === 'sphere') {
     const r = Math.max(size[0], size[1], size[2]) / 2
-    return {
-      bound: new BoundSphereBlock({
-        boxMin: [center[0] - r, center[1] - r, center[2] - r],
-        boxMax: [center[0] + r, center[1] + r, center[2] + r],
-        boxCenter: center,
-        sphereCenter: center,
-        sphereRadius: r,
-        margin: r,
-        volume: (4 / 3) * Math.PI * r ** 3,
-        inertia: [(2 * r * r) / 5, (2 * r * r) / 5, (2 * r * r) / 5],
-        material,
-      }),
-      triangles: 0,
-      type: 'Sphere',
-    }
+    const sphere = new BoundSphereBlock({
+      boxMin: [center[0] - r, center[1] - r, center[2] - r],
+      boxMax: [center[0] + r, center[1] + r, center[2] + r],
+      boxCenter: center,
+      sphereCenter: center,
+      sphereRadius: r,
+      margin: r,
+      volume: (4 / 3) * Math.PI * r ** 3,
+      inertia: [(2 * r * r) / 5, (2 * r * r) / 5, (2 * r * r) / 5],
+      material,
+    })
+    return { children: [sphere], triangles: 0, type: 'Sphere' }
   }
-  const convex = input.dynamic || kind === 'convex' || kind === 'box'
+  const convex = input.dynamic || kind === 'convex' || kind === 'box' || kind === 'capsule'
   if (input.dynamic && kind === 'mesh') warnings.push('Dynamic props need convex collision: the mesh collision was exported as its convex hull.')
   if (convex) {
-    const hull = hullOf(src.vertices)
-    if (!input.dynamic) {
-      const c = geometryCommon(hull, true, material)
-      return { bound: new BoundBvhBlock({ ...c, vertices: hull.vertices, triangles: hull.triangles.map((v) => ({ v, material })) }), triangles: hull.triangles.length, type: 'BVH (convex)' }
-    }
-    const c = geometryCommon(hull, false, material)
-    return { bound: new BoundGeometryBlock({ ...c, vertices: hull.vertices, triangles: hull.triangles.map((v) => ({ v, material })) }), triangles: hull.triangles.length, type: 'Geometry (convex)' }
+    const h = hullBound(src.vertices, input.dynamic, material)
+    return { children: [h.bound], triangles: h.triangles, type: input.dynamic ? 'Geometry (convex)' : 'BVH (convex)' }
   }
-  const m = limitVertices(src)
-  if (m !== src) warnings.push('Collision mesh was too dense and got trimmed; lower the collision detail.')
-  const c = geometryCommon(m, true, material)
-  return { bound: new BoundBvhBlock({ ...c, vertices: m.vertices, triangles: m.triangles.map((v) => ({ v, material })) }), triangles: m.triangles.length, type: 'BVH (mesh)' }
+  const b = meshBound(src, material, warnings)
+  return { children: [b.bound], triangles: b.triangles, type: 'BVH (mesh)' }
 }
 
-function compositeFor(child: BoundBlock): BoundCompositeBlock {
-  const a = child.authored
-  const radius = Math.hypot(a.boxMax[0] - a.boxCenter[0], a.boxMax[1] - a.boxCenter[1], a.boxMax[2] - a.boxCenter[2])
+function compositeFor(children: BoundBlock[]): BoundCompositeBlock {
+  const min: Vec3 = [Infinity, Infinity, Infinity]
+  const max: Vec3 = [-Infinity, -Infinity, -Infinity]
+  let volume = 0
+  const inertia: Vec3 = [0, 0, 0]
+  const cg: Vec3 = [0, 0, 0]
+  for (const child of children) {
+    const a = child.authored
+    for (let k = 0; k < 3; k++) {
+      min[k] = Math.min(min[k], a.boxMin[k])
+      max[k] = Math.max(max[k], a.boxMax[k])
+      inertia[k] += child.inertia[k]
+      cg[k] += a.sphereCenter[k] * child.volume
+    }
+    volume += child.volume
+  }
+  const center: Vec3 = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2]
+  const single = children.length === 1 ? children[0].authored : null
   return new BoundCompositeBlock(
     {
-      boxMin: a.boxMin,
-      boxMax: a.boxMax,
-      boxCenter: a.boxCenter,
-      sphereCenter: a.sphereCenter,
-      sphereRadius: radius,
+      boxMin: min,
+      boxMax: max,
+      boxCenter: single ? single.boxCenter : center,
+      sphereCenter: single ? single.sphereCenter : volume > 0 ? [cg[0] / volume, cg[1] / volume, cg[2] / volume] : center,
+      sphereRadius: Math.hypot(max[0] - center[0], max[1] - center[1], max[2] - center[2]),
       margin: 0,
-      volume: child.volume,
-      inertia: child.inertia,
+      volume,
+      inertia,
     },
-    [child],
+    children,
   )
 }
 
@@ -767,8 +827,8 @@ export function compileProp(input: PropCompileInput): CompiledProp {
       max[k] = Math.max(max[k], g.bbMax[k])
     }
   }
-  const col = collisionBound(input, warnings)
-  const bound = col ? compositeFor(col.bound) : null
+  const col = collisionBounds(input, warnings)
+  const bound = col ? compositeFor(col.children) : null
   if (col) {
     const a = bound!.authored
     for (let k = 0; k < 3; k++) {

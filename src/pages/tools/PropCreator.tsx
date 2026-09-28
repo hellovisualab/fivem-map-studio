@@ -2,12 +2,18 @@ import { Component, useCallback, useEffect, useMemo, useRef, useState, type Reac
 import { Canvas, useThree } from '@react-three/fiber'
 import { ContactShadows, GizmoHelper, GizmoViewport, Grid, OrbitControls, TransformControls } from '@react-three/drei'
 import * as THREE from 'three'
-import { Box, Copy, Maximize2, Move, RotateCcw, Scaling, Trash2, Upload } from 'lucide-react'
+import { Box, Copy, Maximize2, Move, Pencil, RotateCcw, Scaling, Shapes, Trash2, Upload } from 'lucide-react'
 import { ToolShell } from '@/components/tools/ToolShell'
 import { Button } from '@/components/ui/Button'
 import { toast } from '@/components/ui/Toast'
-import { exportPropResource } from '@/lib/propExport'
+import { ModelerWorkspace } from '@/components/modeler/ModelerWorkspace'
+import { collisionGeometries, docToThree, importObject3D, modelMaterials } from '@/lib/modeler/build'
+import { MODEL_FILE_EXT, MATERIAL_SWATCHES, newDoc, newMaterial, parseDoc, serializeDoc } from '@/lib/modeler/doc'
+import type { ModelDoc } from '@/lib/modeler/types'
+import { exportPropResource, surfaceOf } from '@/lib/propExport'
+import { useModeler } from '@/store/useModeler'
 import {
+  applyPropWorldTransform,
   deepCloneObject,
   disposeObject,
   findMaterial,
@@ -21,7 +27,7 @@ import {
 } from '@/lib/propGeometry'
 import { PROP_ACCEPT, cleanModelName, fixModelName, gtaModelName, ingestPropFiles } from '@/lib/propLoad'
 import { canExportTool, recordToolExport } from '@/lib/toolExport'
-import { COLLISION_OPTIONS, COLLISION_QUALITY, type GizmoMode, type PropAsset, type RefKind } from '@/lib/propTypes'
+import { COLLISION_OPTIONS, COLLISION_QUALITY, CUSTOM_COLLISION, SURFACES, type GizmoMode, type PropAsset, type RefKind } from '@/lib/propTypes'
 import { cn, downloadBlob, uid } from '@/lib/utils'
 
 class CanvasErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
@@ -77,8 +83,23 @@ function PrimitiveCollisionOverlay({ prop }: { prop: PropAsset }) {
   )
 }
 
+function ModeledCollisionOverlay({ model }: { model: ModelDoc }) {
+  const geos = useMemo(() => collisionGeometries(model), [model])
+  useEffect(() => () => geos.forEach((g) => g.dispose()), [geos])
+  return (
+    <>
+      {geos.map((geo, i) => (
+        <mesh key={i} geometry={geo} raycast={() => {}}>
+          <meshBasicMaterial color="#33dfff" wireframe transparent opacity={0.8} depthTest={false} />
+        </mesh>
+      ))}
+    </>
+  )
+}
+
 function CollisionOverlay({ prop }: { prop: PropAsset }) {
   if (prop.collision === 'none') return null
+  if (prop.collision === 'custom') return prop.model ? <ModeledCollisionOverlay model={prop.model} /> : null
   if (prop.collision === 'mesh') return <MeshCollisionOverlay object={prop.object} ratio={prop.collisionRatio ?? 0.25} />
   return <PrimitiveCollisionOverlay prop={prop} />
 }
@@ -319,6 +340,10 @@ export function PropCreator() {
   const [showCollision, setShowCollision] = useState(true)
   const [focusTick, setFocusTick] = useState(0)
   const [dragOver, setDragOver] = useState(false)
+  const [workspace, setWorkspace] = useState<'pack' | 'model'>('pack')
+  const [modelPropId, setModelPropId] = useState<string | null>(null)
+  const [progress, setProgress] = useState<string | null>(null)
+  const loadedModel = useRef<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const texRef = useRef<HTMLInputElement>(null)
   const texTarget = useRef<string | null>(null)
@@ -342,6 +367,117 @@ export function PropCreator() {
 
   const patchProp = (id: string, patch: Partial<PropAsset>) => {
     setProps((list) => list.map((p) => (p.id === id ? { ...p, ...patch } : p)))
+  }
+
+  /** Rebuilds the three.js object of a modeled prop from its document. */
+  const modeledPatch = (prop: Pick<PropAsset, 'name' | 'collision'>, doc: ModelDoc): Partial<PropAsset> => {
+    const object = docToThree(doc, modelMaterials)
+    const stats = measureObject(object)
+    const hasCollision = doc.objects.some((o) => o.role === 'collision' && o.mesh.faces.length > 0)
+    return {
+      model: doc,
+      object,
+      file: new File([serializeDoc(doc, prop.name)], `${prop.name}${MODEL_FILE_EXT}`, { type: 'application/json' }),
+      vertexCount: stats.vertexCount,
+      triangleCount: stats.triangleCount,
+      size: stats.size,
+      localMin: stats.min,
+      localMax: stats.max,
+      materials: [],
+      collision: hasCollision ? 'custom' : prop.collision === 'custom' ? 'box' : prop.collision,
+    }
+  }
+
+  const openModeler = (id: string, doc: ModelDoc) => {
+    if (loadedModel.current !== id) {
+      useModeler.getState().load(doc)
+      loadedModel.current = id
+    }
+    setModelPropId(id)
+    setSelectedId(id)
+    setWorkspace('model')
+  }
+
+  const createModelProp = (doc: ModelDoc, label: string, open: boolean) => {
+    const used = new Set(propsRef.current.map((p) => p.name))
+    const name = gtaModelName(label, used)
+    const base: PropAsset = {
+      id: uid(8),
+      name,
+      label,
+      file: new File([], `${name}${MODEL_FILE_EXT}`),
+      object: new THREE.Group(),
+      sidecarUrls: [],
+      position: [0, 0, 0],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+      collision: 'box',
+      collisionRatio: 0.25,
+      lodDist: 60,
+      hdTextureDist: 40,
+      generateLods: false,
+      dynamic: false,
+      vertexCount: 0,
+      triangleCount: 0,
+      size: [0, 0, 0],
+      localMin: [0, 0, 0],
+      localMax: [0, 0, 0],
+      materials: [],
+      warnings: [],
+    }
+    const prop = { ...base, ...modeledPatch(base, doc) }
+    propsRef.current = [...propsRef.current, prop]
+    setProps((list) => [...list, prop])
+    setSelectedId(prop.id)
+    if (open) openModeler(prop.id, doc)
+    else setFocusTick((n) => n + 1)
+    return prop
+  }
+
+  /** Writes the modeler document back into its prop; returns the up to date prop list. */
+  const syncModel = (): PropAsset[] => {
+    const list = propsRef.current
+    const id = modelPropId
+    const prop = id ? list.find((p) => p.id === id) : null
+    const doc = useModeler.getState().doc
+    if (!prop || prop.model === doc) return list
+    const patch = modeledPatch(prop, doc)
+    prop.object.traverse((c) => (c as THREE.Mesh).geometry?.dispose())
+    const next = list.map((p) => (p.id === prop.id ? { ...p, ...patch } : p))
+    propsRef.current = next
+    setProps(next)
+    return next
+  }
+
+  const closeModeler = () => {
+    syncModel()
+    setWorkspace('pack')
+    setFocusTick((n) => n + 1)
+  }
+
+  const enterModeler = () => {
+    const target = (selected?.model ? selected : null) ?? props.find((p) => p.id === modelPropId && p.model) ?? null
+    if (target?.model) openModeler(target.id, target.model)
+    else createModelProp(newDoc(), 'model', true)
+  }
+
+  /** Turns an imported prop into an editable modeler document (transform baked in). */
+  const convertToModel = (prop: PropAsset) => {
+    const wrapped = applyPropWorldTransform(prop.object, prop.position, prop.rotation, prop.scale)
+    const { objects, materials } = importObject3D(wrapped, () => uid(8))
+    if (!objects.length) {
+      toast.error('Nothing to convert', 'This prop has no meshes.')
+      return
+    }
+    const doc: ModelDoc = { objects, materials: materials.length ? materials : [newMaterial('Material', MATERIAL_SWATCHES[0])], cursor: [0, 0, 0] }
+    const patch = { ...modeledPatch(prop, doc), position: [0, 0, 0] as [number, number, number], rotation: [0, 0, 0] as [number, number, number], scale: [1, 1, 1] as [number, number, number] }
+    release(prop)
+    const next = propsRef.current.map((p) => (p.id === prop.id ? { ...p, ...patch, sidecarUrls: [] } : p))
+    propsRef.current = next
+    setProps(next)
+    loadedModel.current = null
+    openModeler(prop.id, doc)
+    if (prop.triangleCount > 60000) toast.info('Heavy mesh', 'Over 60k triangles: editing may be slow. Consider decimating it first.')
   }
 
   const addPrimitive = (kind: 'box' | 'sphere' | 'cylinder') => {
@@ -391,7 +527,18 @@ export function PropCreator() {
   }
 
   const addFiles = useCallback(async (list: FileList | File[]) => {
-    const files = Array.from(list)
+    const all = Array.from(list)
+    const models = all.filter((f) => f.name.toLowerCase().endsWith('.json'))
+    const files = all.filter((f) => !f.name.toLowerCase().endsWith('.json'))
+    for (const f of models) {
+      try {
+        const { doc, name } = parseDoc(await f.text())
+        createModelProp(doc, name, false)
+        toast.success('Model opened', f.name)
+      } catch (e) {
+        toast.error('Could not open model', (e as Error).message)
+      }
+    }
     if (!files.length) return
     setBusy(true)
     try {
@@ -444,6 +591,7 @@ export function PropCreator() {
     } finally {
       setBusy(false)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const removeSelected = () => {
@@ -477,20 +625,25 @@ export function PropCreator() {
       return
     }
     if (!canExportTool()) return
+    const list = workspace === 'model' ? syncModel() : props
     setBusy(true)
     try {
-      const { blob, fileName, renamed } = await exportPropResource(props, projectName)
+      const { blob, fileName, renamed, warnings } = await exportPropResource(list, projectName, setProgress)
       downloadBlob(blob, fileName)
       await recordToolExport('Prop Creator')
+      toast.success('FiveM resource ready', `${fileName}: .ydr + .ytyp + fxmanifest, collision and textures included.`)
       if (renamed) toast.info('Model names fixed', `${renamed} prop${renamed === 1 ? ' had an empty or duplicate name' : 's had empty or duplicate names'} and got a unique one in the export.`)
+      for (const w of warnings.slice(0, 4)) toast.info('Export note', w)
     } catch (e) {
       toast.error('Export failed', (e as Error).message)
     } finally {
       setBusy(false)
+      setProgress(null)
     }
   }
 
   useEffect(() => {
+    if (workspace === 'model') return
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
@@ -512,7 +665,7 @@ export function PropCreator() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedId])
+  }, [selectedId, workspace])
 
   const refreshMaterials = (prop: PropAsset) => {
     patchProp(prop.id, { materials: listMaterials(prop.object) })
@@ -520,15 +673,44 @@ export function PropCreator() {
 
   const tris = props.reduce((s, p) => s + p.triangleCount, 0)
 
+  const modelProp = props.find((p) => p.id === modelPropId) ?? null
+
   return (
     <ToolShell
       title={projectName || 'Prop Creator'}
-      subtitle={`${props.length} prop${props.length === 1 ? '' : 's'} · ${tris.toLocaleString()} tris`}
+      subtitle={progress ?? (workspace === 'model' && modelProp ? `Modeler · ${modelProp.name}` : `${props.length} prop${props.length === 1 ? '' : 's'} · ${tris.toLocaleString()} tris`)}
       onExport={() => void doExport()}
+      exportLabel="Export for FiveM"
       exportLoading={busy}
       exportDisabled={!props.length || busy}
     >
-      <div className="grid h-full min-h-[calc(100vh-52px)] grid-cols-1 lg:grid-cols-[240px_1fr_300px]">
+      <div className="flex h-full min-h-[calc(100vh-52px)] flex-col">
+      <div className="flex shrink-0 items-center gap-1 border-b border-ink-800 bg-ink-950 px-3 py-1.5">
+        {(
+          [
+            ['pack', 'Pack & export', Box],
+            ['model', 'Modeler', Shapes],
+          ] as const
+        ).map(([id, label, Icon]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => (id === 'model' ? workspace !== 'model' && enterModeler() : workspace !== 'pack' && closeModeler())}
+            className={cn('flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition', workspace === id ? 'bg-brand-500/15 text-brand-200' : 'text-ink-400 hover:bg-white/5 hover:text-ink-100')}
+          >
+            <Icon className="h-3.5 w-3.5" /> {label}
+          </button>
+        ))}
+        <span className="ml-2 hidden truncate text-[11px] text-ink-500 md:inline">
+          {workspace === 'model' ? 'Blender-style modelling · Tab edit mode · right click for tools · Done returns to the pack' : 'Import or model props, set collision and LODs, then export native .ydr / .ytyp for FiveM'}
+        </span>
+      </div>
+      {workspace === 'model' ? (
+        <div className="h-[calc(100vh-52px-41px)] min-h-[560px]">
+          <ModelerWorkspace name={modelProp?.name ?? 'model'} onDone={closeModeler} />
+        </div>
+      ) : (
+      <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[240px_1fr_300px]">
         <aside className="flex flex-col border-b border-ink-800 lg:border-r lg:border-b-0">
           <div className="border-b border-ink-800 px-3 py-3">
             <p className="text-xs font-semibold tracking-wider text-ink-500 uppercase">Resource</p>
@@ -552,6 +734,9 @@ export function PropCreator() {
             ))}
           </div>
           <div className="space-y-2 border-t border-ink-800 p-3">
+            <Button size="sm" className="w-full" onClick={() => createModelProp(newDoc(), 'model', true)}>
+              <Shapes className="h-4 w-4" /> New model (Blender-style)
+            </Button>
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
@@ -563,13 +748,13 @@ export function PropCreator() {
               className="flex w-full flex-col items-center rounded-xl border border-dashed border-ink-600 px-3 py-6 text-center text-xs text-ink-400 hover:border-brand-500/50 hover:text-brand-300"
             >
               <Upload className="mb-2 h-5 w-5" />
-              Add prop · GLB GLTF OBJ FBX STL
+              Add prop · GLB GLTF OBJ FBX STL · model .json
             </button>
             <input
               ref={fileRef}
               type="file"
               multiple
-              accept={PROP_ACCEPT}
+              accept={`${PROP_ACCEPT},.json,application/json`}
               className="hidden"
               onChange={(e) => {
                 if (e.target.files) void addFiles(e.target.files)
@@ -648,7 +833,7 @@ export function PropCreator() {
               </button>
             ))}
           </div>
-          {!props.length && <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center text-sm text-ink-500">Drop a GLB, OBJ, FBX or STL to get started.</div>}
+          {!props.length && <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center text-sm text-ink-500">Drop a GLB, OBJ, FBX or STL — or click “New model” to build one Blender-style.</div>}
           {dragOver && <div className="pointer-events-none absolute inset-0 z-20 border-2 border-dashed border-brand-500 bg-brand-500/10" />}
           <CanvasErrorBoundary>
             <Canvas camera={{ position: [4, 3, 6], fov: 45 }} dpr={[1, 1.5]} gl={{ antialias: true, powerPreference: 'high-performance' }} style={{ width: '100%', height: '100%' }} onPointerMissed={() => setSelectedId(null)}>
@@ -697,6 +882,15 @@ export function PropCreator() {
                 <p className="text-[10px] text-ink-500">
                   {selected.vertexCount.toLocaleString()} verts · {selected.triangleCount.toLocaleString()} tris · {selected.size.map((n, i) => (n * Math.abs(selected.scale[i])).toFixed(2)).join(' × ')} m
                 </p>
+                {selected.model ? (
+                  <Button size="sm" className="w-full" onClick={() => openModeler(selected.id, selected.model!)}>
+                    <Pencil className="h-3.5 w-3.5" /> Edit in modeler
+                  </Button>
+                ) : (
+                  <Button variant="outline" size="sm" className="w-full" onClick={() => convertToModel(selected)} title="Edit this mesh in the Blender-style modeler">
+                    <Shapes className="h-3.5 w-3.5" /> Convert to editable mesh
+                  </Button>
+                )}
                 <div className="flex gap-1">
                   <Button variant="outline" size="sm" className="flex-1" onClick={duplicateSelected}>
                     <Copy className="h-3.5 w-3.5" /> Duplicate
@@ -752,6 +946,8 @@ export function PropCreator() {
             <p className="text-[11px] font-semibold tracking-wider text-ink-500 uppercase">Materials</p>
             {!selected ? (
               <p className="mt-2 text-xs text-ink-500">No materials — add a prop first.</p>
+            ) : selected.model ? (
+              <p className="mt-2 text-xs text-ink-500">Modeled prop: edit its materials and textures in the modeler (Material tab).</p>
             ) : !selected.materials.length ? (
               <p className="mt-2 text-xs text-ink-500">This mesh has no editable materials.</p>
             ) : (
@@ -864,7 +1060,7 @@ export function PropCreator() {
               <p className="mt-2 text-xs text-ink-500">Select a prop</p>
             ) : (
               <div className="mt-2 grid grid-cols-2 gap-1">
-                {COLLISION_OPTIONS.map((opt) => (
+                {[...(selected.model?.objects.some((o) => o.role === 'collision') ? [CUSTOM_COLLISION] : []), ...COLLISION_OPTIONS].map((opt) => (
                   <button
                     key={opt.id}
                     type="button"
@@ -918,6 +1114,20 @@ export function PropCreator() {
             )}
           </div>
 
+          {selected && selected.collision !== 'none' && (
+            <label className="block text-[10px] text-ink-500">
+              Collision surface (sounds, bullet impacts, weight)
+              <select className="field field-sm mt-0.5" value={selected.surface ?? ''} onChange={(e) => patchProp(selected.id, { surface: e.target.value === '' ? undefined : Number(e.target.value) })}>
+                <option value="">Auto · {SURFACES.find((x) => x.id === surfaceOf(selected))?.label}</option>
+                {SURFACES.map((x) => (
+                  <option key={x.id} value={x.id}>
+                    {x.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
           <div>
             <p className="text-[11px] font-semibold tracking-wider text-ink-500 uppercase">LODs & spawn</p>
             {!selected ? (
@@ -948,6 +1158,16 @@ export function PropCreator() {
                     onChange={(e) => patchProp(selected.id, { hdTextureDist: Number(e.target.value) })}
                   />
                 </label>
+                <label className="block text-[10px] text-ink-500">
+                  Max texture size
+                  <select className="field field-sm mt-0.5" value={selected.textureSize ?? 1024} onChange={(e) => patchProp(selected.id, { textureSize: Number(e.target.value) })}>
+                    {[256, 512, 1024, 2048].map((n) => (
+                      <option key={n} value={n}>
+                        {n} px{n === 1024 ? ' (recommended)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label className="flex items-center gap-2 text-xs text-ink-300">
                   <input type="checkbox" checked={selected.generateLods} onChange={(e) => patchProp(selected.id, { generateLods: e.target.checked })} />
                   Generate LOD1 / LOD2 meshes
@@ -960,6 +1180,8 @@ export function PropCreator() {
             )}
           </div>
         </aside>
+      </div>
+      )}
       </div>
     </ToolShell>
   )
